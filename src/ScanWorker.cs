@@ -15,7 +15,7 @@ namespace PeripheralBattery
 
     internal static class ScanProtocol
     {
-        private const int Signature = 0x50425431;
+        private const int Signature = 0x50425432;
         internal static void Write(Stream stream, ScanSnapshot snapshot)
         {
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
@@ -26,6 +26,7 @@ namespace PeripheralBattery
                 {
                     writer.Write(device.Id ?? ""); writer.Write(device.Name ?? ""); writer.Write(device.Detail ?? "");
                     writer.Write(device.Level ?? ""); writer.Write(device.Address ?? ""); writer.Write((byte)device.Transport);
+                    writer.Write((byte)device.Kind);
                     writer.Write(device.Percent.HasValue);
                     if (device.Percent.HasValue) writer.Write((byte)device.Percent.Value);
                 }
@@ -48,9 +49,10 @@ namespace PeripheralBattery
                 var devices = new List<BatteryDevice>(count);
                 for (int i = 0; i < count; i++)
                 {
-                    var device = new BatteryDevice { Id = reader.ReadString(), Name = reader.ReadString(), Detail = reader.ReadString(), Level = reader.ReadString(), Address = reader.ReadString(), Transport = (DeviceTransport)reader.ReadByte() };
+                    var device = new BatteryDevice { Id = reader.ReadString(), Name = reader.ReadString(), Detail = reader.ReadString(), Level = reader.ReadString(), Address = reader.ReadString(), Transport = (DeviceTransport)reader.ReadByte(), Kind = (DeviceKind)reader.ReadByte() };
                     if (device.Level.Length == 0) device.Level = null;
                     if (!Enum.IsDefined(typeof(DeviceTransport), device.Transport)) throw new InvalidDataException("连接类型无效");
+                    if (!Enum.IsDefined(typeof(DeviceKind), device.Kind)) throw new InvalidDataException("设备类型无效");
                     if (reader.ReadBoolean())
                     {
                         byte percent = reader.ReadByte();

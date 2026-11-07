@@ -12,6 +12,7 @@ namespace PeripheralBattery
     {
         public string Id, Name, Detail, Level, Address;
         public DeviceTransport Transport;
+        public DeviceKind Kind;
         public int? Percent;
         public string Connection
         {
@@ -40,6 +41,7 @@ namespace PeripheralBattery
         public string Id, Name, Container;
         public bool? Connected;
         public int? Percent;
+        public DeviceKind Kind;
     }
     internal sealed class WindowsProvider : IBatteryProvider
     {
@@ -65,7 +67,9 @@ namespace PeripheralBattery
                     byte[] state = Native.Property(set, ref info, "83DA6326-97A6-4088-9453-A1923F573B29", 15, out type);
                     bool? connected = state != null && type == 17 && state.Length == 1 ? (bool?)(state[0] != 0) : null;
                     string name = Native.TextProperty(set, ref info, "A45C254E-DF1C-4EFD-8020-67D146A850E0", 14);
-                    nodes.Add(new DeviceNode { Id = instance, Name = name, Container = Native.Container(set, ref info), Percent = percent, Connected = connected });
+                    byte[] category = Native.Property(set, ref info, "78C34FC8-104A-4ACA-9EA4-524D52996E57", 90, out type);
+                    DeviceKind kind = DevicePresentation.Classify(category != null && type == 8210 ? Encoding.Unicode.GetString(category) : name);
+                    nodes.Add(new DeviceNode { Id = instance, Name = name, Container = Native.Container(set, ref info), Percent = percent, Connected = connected, Kind = kind });
                 }
             }
             finally { Native.SetupDiDestroyDeviceInfoList(set); }
@@ -76,7 +80,7 @@ namespace PeripheralBattery
                 if (root.Connected != true) continue;
                 var level = root.Percent;
                 if (!level.HasValue && root.Container != "") level = nodes.Where(n => n.Container == root.Container).Select(n => n.Percent).FirstOrDefault(p => p.HasValue);
-                result.Add(new BatteryDevice { Id = root.Container == "" ? root.Id : root.Container, Name = root.Name, Transport = DeviceTransport.Bluetooth, Percent = level, Detail = level.HasValue ? "Windows 最近上报的电量" : "已连接 · 系统未上报电量" });
+                result.Add(new BatteryDevice { Id = root.Container == "" ? root.Id : root.Container, Name = root.Name, Transport = DeviceTransport.Bluetooth, Kind = root.Kind, Percent = level, Detail = level.HasValue ? "Windows 最近上报的电量" : "已连接 · 系统未上报电量" });
             }
             return result;
         }
@@ -155,6 +159,7 @@ namespace PeripheralBattery
         public void Read(HidDevice d, BatteryDevice result)
         {
             result.Transport = DeviceTransport.UsbReceiver;
+            result.Kind = DeviceKind.Mouse;
             using (var file = Native.CreateFile(d.Path, 0xC0000000, 3, IntPtr.Zero, 3, 0x40000000, IntPtr.Zero))
             {
                 if (file.IsInvalid) { result.Detail = "接收器已发现 · 暂时无法访问"; return; }
@@ -192,6 +197,7 @@ namespace PeripheralBattery
         }
         public void Read(HidDevice d, BatteryDevice result)
         {
+            result.Kind = DeviceKind.Controller;
             using (var file = Native.CreateFile(d.Path, 0x80000000, 3, IntPtr.Zero, 3, 0x40000000, IntPtr.Zero))
             {
                 if (file.IsInvalid) { result.Detail = "手柄被其他程序独占或已断开"; return; }
@@ -257,6 +263,9 @@ namespace PeripheralBattery
                 if (selected == null) selected = group.FirstOrDefault(d => d.Page == 1 && (d.Usage == 2 || d.Usage == 4 || d.Usage == 5 || d.Usage == 6));
                 if (selected == null) continue;
                 var row = new BatteryDevice { Id = group.Key, Name = string.IsNullOrWhiteSpace(selected.Name) ? string.Format("HID 外设 {0:X4}:{1:X4}", selected.Vendor, selected.Product) : selected.Name, Transport = selected.Transport, Detail = "设备接口已发现 · 电量协议待适配" };
+                if (group.Any(device => device.Page == 1 && (device.Usage == 4 || device.Usage == 5))) row.Kind = DeviceKind.Controller;
+                else if (group.Any(device => device.Page == 1 && device.Usage == 2)) row.Kind = DeviceKind.Mouse;
+                else if (group.Any(device => device.Page == 1 && device.Usage == 6)) row.Kind = DeviceKind.Keyboard;
                 IHidBatteryReader reader = readers.FirstOrDefault(r => r.Supports(selected));
                 // USB enumeration alone cannot distinguish a receiver from a cable.
                 // Known receiver protocols may establish the link type by querying it.
@@ -295,7 +304,7 @@ namespace PeripheralBattery
                 Capabilities capabilities;
                 if (battery.Type == 1 || XInputGetCapabilities(i, 0, out capabilities) != 0 || (capabilities.Flags & 2) == 0) continue;
                 bool known = (battery.Type == 2 || battery.Type == 3) && battery.Level <= 3;
-                result.Add(new BatteryDevice { Id = "xinput-" + i, Name = "XInput 手柄 " + (i + 1), Transport = DeviceTransport.Wireless, Level = known ? new[] { "电量耗尽", "低电量", "中电量", "电量充足" }[battery.Level] : null, Detail = "驱动确认无线连接，未区分蓝牙或接收器 · " + (known ? "驱动上报档位" : "驱动未提供有效电量") });
+                result.Add(new BatteryDevice { Id = "xinput-" + i, Name = "XInput 手柄 " + (i + 1), Transport = DeviceTransport.Wireless, Kind = DeviceKind.Controller, Level = known ? new[] { "电量耗尽", "低电量", "中电量", "电量充足" }[battery.Level] : null, Detail = "驱动确认无线连接，未区分蓝牙或接收器 · " + (known ? "驱动上报档位" : "驱动未提供有效电量") });
             }
             return result;
         }
@@ -316,6 +325,7 @@ namespace PeripheralBattery
                         if (existing == null) rows.Add(row);
                         else
                         {
+                            if (existing.Kind == DeviceKind.Other) existing.Kind = row.Kind;
                             // A device-specific wired result takes precedence over
                             // cached Bluetooth properties sharing the same container.
                             if (row.Transport == DeviceTransport.UsbWired) existing.Transport = row.Transport;

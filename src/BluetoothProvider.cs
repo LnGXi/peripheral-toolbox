@@ -74,7 +74,7 @@ namespace PeripheralBattery
                 string address = (addressValue as string ?? "").Replace(":", "").Replace("-", "").ToUpperInvariant();
                 Guid container;
                 string id = containerValue != null && Guid.TryParse(containerValue.ToString(), out container) && container != Guid.Empty ? container.ToString() : endpoint.Id;
-                var row = new BatteryDevice { Id = id, Address = address, Name = endpoint.Name, Transport = DeviceTransport.Bluetooth, Detail = "当前读取方式未获取到电量" };
+                var row = new BatteryDevice { Id = id, Address = address, Name = endpoint.Name, Kind = DevicePresentation.Classify(endpoint.Name), Transport = DeviceTransport.Bluetooth, Detail = "当前读取方式未获取到电量" };
                 int percent;
                 if (batteryValue != null && int.TryParse(batteryValue.ToString(), out percent) && percent >= 0 && percent <= 100)
                 {

@@ -11,17 +11,16 @@ namespace PeripheralBattery
     {
         private static Color Ink { get { return Appearance.Current.Text; } }
         private static Color Muted { get { return Appearance.Current.Muted; } }
-        private static Color Accent { get { return Appearance.Current.Accent; } }
         private readonly Font titleFont = new Font("Microsoft YaHei UI", 13, FontStyle.Bold);
         private readonly Font nameFont = new Font("Microsoft YaHei UI", 9.5F);
         private readonly Font bodyFont = new Font("Microsoft YaHei UI", 9);
         private readonly Font smallFont = new Font("Microsoft YaHei UI", 8);
-        private readonly Font numberFont = new Font("Segoe UI", 27, FontStyle.Bold);
+        private readonly Font numberFont = new Font("Segoe UI", 16, FontStyle.Bold, GraphicsUnit.Pixel);
         private readonly Rectangle refreshButton = new Rectangle(312, 20, 30, 30);
         private readonly Rectangle closeButton = new Rectangle(352, 20, 30, 30);
         private const int ListTop = 68;
         private const int RowHeight = 80;
-        private int ListHeight { get { return Math.Min(Math.Max(1, devices.Count), 5) * RowHeight; } }
+        private int ListHeight { get { return Math.Max(0, ClientSize.Height - 112); } }
         private List<BatteryDevice> devices = new List<BatteryDevice>();
         private List<string> errors = new List<string>();
         private DateTime? updated;
@@ -35,6 +34,7 @@ namespace PeripheralBattery
         internal event EventHandler ThemeChanged;
 
         [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+        [StructLayout(LayoutKind.Sequential)] private struct WindowRectangle { public int Left, Top, Right, Bottom; }
         internal Popup()
         {
             Native.SetProcessDPIAware();
@@ -82,6 +82,15 @@ namespace PeripheralBattery
         }
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == 0x0216 && message.LParam != IntPtr.Zero)
+            {
+                var raw = (WindowRectangle)Marshal.PtrToStructure(message.LParam, typeof(WindowRectangle));
+                Rectangle bounds = ConstrainBounds(Rectangle.FromLTRB(raw.Left, raw.Top, raw.Right, raw.Bottom), Screen.FromPoint(Cursor.Position).WorkingArea);
+                raw.Left = bounds.Left; raw.Top = bounds.Top; raw.Right = bounds.Right; raw.Bottom = bounds.Bottom;
+                Marshal.StructureToPtr(raw, message.LParam, false);
+                message.Result = new IntPtr(1);
+                return;
+            }
             if (message.Msg == 0x0231) { moving = true; moveOrigin = Location; }
             base.WndProc(ref message);
             if (message.Msg == 0x0084)
@@ -92,9 +101,11 @@ namespace PeripheralBattery
             }
             if (message.Msg == 0x0232 && moving)
             {
+                Bounds = ConstrainBounds(Bounds, Screen.FromPoint(Cursor.Position).WorkingArea);
                 userPosition = userPosition || Location != moveOrigin;
                 moving = false;
             }
+            if (Visible && (message.Msg == 0x007E || message.Msg == 0x001A)) Bounds = ConstrainBounds(Bounds, Screen.FromRectangle(Bounds).WorkingArea);
             if ((message.Msg == 0x001A || message.Msg == 0x031A) && ThemeChanged != null) ThemeChanged(this, EventArgs.Empty);
         }
         internal bool CanDrag(Point point)
@@ -102,15 +113,17 @@ namespace PeripheralBattery
             return point.X >= 0 && point.X < Width && point.Y >= 0 && point.Y < ListTop
                 && !refreshButton.Contains(point) && !closeButton.Contains(point);
         }
-        private Point ConstrainLocation(Point location)
+        internal static Rectangle ConstrainBounds(Rectangle bounds, Rectangle area)
         {
-            Rectangle area = Screen.FromRectangle(new Rectangle(location, Size)).WorkingArea;
-            return new Point(Math.Max(area.Left, Math.Min(location.X, area.Right - Width)), Math.Max(area.Top, Math.Min(location.Y, area.Bottom - Height)));
+            int width = Math.Min(bounds.Width, area.Width), height = Math.Min(bounds.Height, area.Height);
+            int x = Math.Max(area.Left, Math.Min(bounds.X, area.Right - width));
+            int y = Math.Max(area.Top, Math.Min(bounds.Y, area.Bottom - height));
+            return new Rectangle(x, y, width, height);
         }
         protected override void OnSizeChanged(EventArgs e)
         {
             base.OnSizeChanged(e);
-            if (IsHandleCreated) UpdateRegion();
+            if (IsHandleCreated) { UpdateRegion(); scroll = Math.Min(scroll, MaxScroll()); }
         }
         private void UpdateRegion()
         {
@@ -121,19 +134,22 @@ namespace PeripheralBattery
         internal void ShowAtTray()
         {
             Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
-            Location = userPosition ? ConstrainLocation(Location) : new Point(Math.Max(area.Left, area.Right - Width - 14), Math.Max(area.Top, area.Bottom - Height - 14));
+            if (userPosition) area = Screen.FromRectangle(Bounds).WorkingArea;
+            Point location = userPosition ? Location : new Point(area.Right - Width - 14, area.Bottom - Height - 14);
+            Bounds = ConstrainBounds(new Rectangle(location, Size), area);
             Show(); Activate();
         }
         internal void Render(List<BatteryDevice> rows, List<string> failures)
         {
             devices = rows; errors = failures; updated = DateTime.Now;
             int bottom = Bottom;
-            ClientSize = new Size(400, ListHeight + 112);
+            ClientSize = new Size(400, Math.Min(Math.Max(1, devices.Count), 5) * RowHeight + 112);
             if (Visible)
             {
-                if (userPosition || moving) Location = ConstrainLocation(Location);
+                if (userPosition || moving) Bounds = ConstrainBounds(Bounds, Screen.FromRectangle(Bounds).WorkingArea);
                 else Top = Math.Max(Screen.FromControl(this).WorkingArea.Top, bottom - Height);
             }
+            Bounds = ConstrainBounds(Bounds, Screen.FromRectangle(Bounds).WorkingArea);
             scroll = Math.Min(scroll, MaxScroll());
             Invalidate();
         }
@@ -206,39 +222,51 @@ namespace PeripheralBattery
             UiDrawing.FillRounded(g, new Rectangle(20, top, 360, 72), 14, Appearance.Current.Surface);
             UiDrawing.FillRounded(g, new Rectangle(34, top + 16, 36, 36), 11, Appearance.Current.IconBackground);
             DrawDeviceIcon(g, device, 40, top + 22);
-            TextAt(g, device.Name, nameFont, Ink, new Rectangle(82, top + 14, 166, 26), false);
+            TextAt(g, device.Name, nameFont, Ink, new Rectangle(82, top + 14, 202, 26), false);
             TextAt(g, device.Connection, smallFont, Muted, new Rectangle(83, top + 38, 175, 16), false);
-            if (device.Percent.HasValue)
+            DrawGauge(g, new Rectangle(300, top + 8, 56, 56), device, numberFont, Appearance.Current);
+        }
+        internal static void DrawGauge(Graphics graphics, Rectangle bounds, BatteryDevice device, Font font, Palette palette)
+        {
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            Rectangle circle = Rectangle.Inflate(bounds, -3, -3);
+            Color color = device.Percent.HasValue ? (device.Percent.Value < 20 ? palette.LowBattery : palette.Accent) : palette.Muted;
+            using (var track = new Pen(palette.Track, 4)) graphics.DrawEllipse(track, circle);
+            if (device.Percent.HasValue && device.Percent.Value > 0)
             {
-                Color color = device.Percent.Value <= 20 ? Appearance.Current.LowBattery : Accent;
-                TextAt(g, device.Percent.Value.ToString(), numberFont, color, new Rectangle(250, top + 9, 96, 46), true);
-                TextAt(g, "%", bodyFont, color, new Rectangle(348, top + 28, 17, 21), false);
-                UiDrawing.FillRounded(g, new Rectangle(83, top + 58, 175, 3), 1, Appearance.Current.Track);
-                int width = (int)Math.Round(175 * device.Percent.Value / 100.0);
-                if (width >= 4) UiDrawing.FillRounded(g, new Rectangle(83, top + 58, width, 3), 1, color);
+                float consumed = (100 - device.Percent.Value) * 3.6F;
+                using (var progress = new Pen(color, 4) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                {
+                    if (device.Percent.Value == 100) graphics.DrawEllipse(progress, circle);
+                    else graphics.DrawArc(progress, circle, -90 + consumed, 360 - consumed);
+                }
             }
-            else
-            {
-                TextAt(g, device.Level ?? "未读取", bodyFont, Muted, new Rectangle(276, top + 22, 84, 26), true);
-            }
+            TextRenderer.DrawText(graphics, DevicePresentation.Level(device), font, Rectangle.Inflate(bounds, -6, -6), color,
+                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
         private static void DrawDeviceIcon(Graphics g, BatteryDevice device, int left, int top)
         {
-            string name = device.Name.ToLowerInvariant();
+            DeviceKind kind = device.Kind == DeviceKind.Other ? DevicePresentation.Classify(device.Name) : device.Kind;
             using (var pen = new Pen(Appearance.Current.Glyph, 1.6F))
             {
                 pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round;
-                if (name.Contains("mouse") || name.Contains("鼠标"))
+                if (kind == DeviceKind.Headset)
+                {
+                    g.DrawArc(pen, left + 2, top + 1, 19, 20, 180, 180);
+                    using (var path = UiDrawing.Rounded(new Rectangle(left + 1, top + 10, 5, 11), 2)) g.DrawPath(pen, path);
+                    using (var path = UiDrawing.Rounded(new Rectangle(left + 17, top + 10, 5, 11), 2)) g.DrawPath(pen, path);
+                }
+                else if (kind == DeviceKind.Mouse)
                 {
                     using (var path = UiDrawing.Rounded(new Rectangle(left + 4, top, 15, 24), 7)) g.DrawPath(pen, path);
                     g.DrawLine(pen, left + 11, top + 5, left + 11, top + 10);
                 }
-                else if (name.Contains("keyboard") || name.Contains("键盘"))
+                else if (kind == DeviceKind.Keyboard)
                 {
                     using (var path = UiDrawing.Rounded(new Rectangle(left, top + 4, 23, 16), 3)) g.DrawPath(pen, path);
                     for (int row = 0; row < 2; row++) for (int column = 0; column < 4; column++) g.DrawLine(pen, left + 5 + column * 4, top + 9 + row * 4, left + 6 + column * 4, top + 9 + row * 4);
                 }
-                else if (name.Contains("controller") || name.Contains("手柄"))
+                else if (kind == DeviceKind.Controller)
                 {
                     using (var path = UiDrawing.Rounded(new Rectangle(left, top + 4, 23, 17), 6)) g.DrawPath(pen, path);
                     g.DrawLine(pen, left + 5, top + 12, left + 11, top + 12); g.DrawLine(pen, left + 8, top + 9, left + 8, top + 15);

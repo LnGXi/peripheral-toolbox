@@ -20,6 +20,7 @@ namespace PeripheralBattery
         }
         public void Read(HidDevice device, BatteryDevice result)
         {
+            result.Kind = DeviceKind.Controller;
             using (var file = Native.CreateFile(device.Path, 0xC0000000, 3, IntPtr.Zero, 3, 0x40000000, IntPtr.Zero))
             {
                 if (file.IsInvalid) { result.Detail = "手柄接口暂时无法访问"; return; }

@@ -38,7 +38,7 @@ namespace PeripheralBattery
             using (var key = Registry.CurrentUser.CreateSubKey(RunKey)) key.SetValue("PeripheralBattery", "\"" + ExePath + "\" --background");
             using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
             {
-                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.5.0");
+                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.6.0");
                 key.SetValue("UninstallString", "\"" + ExePath + "\" --uninstall"); key.SetValue("DisplayIcon", ExePath);
                 key.SetValue("NoModify", 1); key.SetValue("NoRepair", 1);
             }
@@ -146,8 +146,7 @@ namespace PeripheralBattery
                 if (exiting) return;
                 var devices = snapshot.Devices;
                 popup.Render(devices, snapshot.Errors);
-                string summary = string.Join(" | ", devices.Select(d => d.Name + " " + d.Display));
-                tray.Text = summary.Length == 0 ? "外设工具箱 · 暂无设备" : summary.Substring(0, Math.Min(63, summary.Length));
+                tray.Text = DevicePresentation.Tooltip(devices);
                 var alerts = lowBattery.Pending(devices);
                 if (alerts.Count > 0)
                 {
