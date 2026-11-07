@@ -16,6 +16,8 @@ internal static class TooltipRegression
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder name, int count);
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+    [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr window, int index);
+    [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr window, int index, int value);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
     private static void Check(bool condition, string message)
     {
@@ -80,7 +82,11 @@ internal static class TooltipRegression
         };
         using (var popup = new Popup { TopMost = true, Location = new Point(80, 80) })
         {
-            popup.Render(rows, new List<string>()); popup.Show(); Application.DoEvents();
+            popup.Render(rows, new List<string>());
+            // Exercise native tracking tooltips without taking desktop focus.
+            // Focus changes outside the test must not light-dismiss this fixture.
+            SetWindowLong(popup.Handle, -20, GetWindowLong(popup.Handle, -20) | 0x08000000);
+            popup.Show(); Application.DoEvents();
             Move(popup, 90, 90); Pump(600);
             Check(TipVisible(), "Tooltip appears after hover delay");
             Pump(2700);

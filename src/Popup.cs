@@ -201,6 +201,9 @@ namespace PeripheralBattery
             if (Disposing || IsDisposed) return;
             tooltipTimer.Stop();
             toolTip.Hide(this);
+            // Show also registers an automatic tool for the whole control.
+            // Unregister it so native mouse handling cannot reopen a stale tip.
+            toolTip.RemoveAll();
             tooltipVisible = false;
             tooltipText = null;
         }
@@ -210,12 +213,13 @@ namespace PeripheralBattery
             if (tooltipVisible || !Visible || moving || string.IsNullOrEmpty(tooltipText))
             {
                 toolTip.Hide(this);
+                toolTip.RemoveAll();
                 tooltipVisible = false;
                 return;
             }
             // The same target stays dismissed after expiry until the pointer
             // enters another target. Mouse movement cannot keep extending it.
-            toolTip.Show(tooltipText, this, new Point(pointer.X + 12, pointer.Y + 22), 2500);
+            toolTip.Show(tooltipText, this, new Point(pointer.X + 12, pointer.Y + 22));
             tooltipVisible = true;
             tooltipTimer.Interval = 2500;
             tooltipTimer.Start();
