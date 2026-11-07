@@ -29,6 +29,7 @@ namespace PeripheralBattery
         private readonly ToolTip toolTip = new ToolTip { InitialDelay = 450 };
         private string tooltipText;
         private bool userPosition, moving;
+        internal bool Acrylic { get; private set; }
         private Point moveOrigin;
         internal event EventHandler RefreshRequested;
         internal event EventHandler ThemeChanged;
@@ -44,7 +45,7 @@ namespace PeripheralBattery
             MinimizeBox = false;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            ClientSize = new Size(400, 192);
+            Size = new Size(400, 192);
             BackColor = Appearance.Current.Background;
             DoubleBuffered = true;
             SetStyle(ControlStyles.ResizeRedraw, true);
@@ -60,7 +61,7 @@ namespace PeripheralBattery
         }
         protected override CreateParams CreateParams
         {
-            get { var parameters = base.CreateParams; parameters.ClassStyle |= 0x20000; return parameters; }
+            get { var parameters = base.CreateParams; parameters.ClassStyle |= 0x20000; parameters.Style |= WindowBackdrop.FrameStyle; return parameters; }
         }
         protected override void OnHandleCreated(EventArgs e)
         {
@@ -77,11 +78,16 @@ namespace PeripheralBattery
             {
                 int dark = Appearance.Current.Dark ? 1 : 0;
                 DwmSetWindowAttribute(Handle, 20, ref dark, 4);
+                Acrylic = WindowBackdrop.Apply(Handle, Appearance.Current);
+                UpdateRegion();
             }
             Invalidate();
         }
         protected override void WndProc(ref Message message)
         {
+            // Keep the native frame style required by Desktop Acrylic, while
+            // letting the existing custom header occupy the whole client area.
+            if (message.Msg == 0x0083 && WindowBackdrop.Supported) { message.Result = IntPtr.Zero; return; }
             if (message.Msg == 0x0216 && message.LParam != IntPtr.Zero)
             {
                 var raw = (WindowRectangle)Marshal.PtrToStructure(message.LParam, typeof(WindowRectangle));
@@ -97,7 +103,8 @@ namespace PeripheralBattery
             {
                 long coordinates = message.LParam.ToInt64();
                 var screen = new Point(unchecked((short)(coordinates & 0xFFFF)), unchecked((short)((coordinates >> 16) & 0xFFFF)));
-                if (CanDrag(PointToClient(screen))) message.Result = new IntPtr(2);
+                Point point = PointToClient(screen);
+                if (ClientRectangle.Contains(point)) message.Result = new IntPtr(CanDrag(point) ? 2 : 1);
             }
             if (message.Msg == 0x0232 && moving)
             {
@@ -106,7 +113,7 @@ namespace PeripheralBattery
                 moving = false;
             }
             if (Visible && (message.Msg == 0x007E || message.Msg == 0x001A)) Bounds = ConstrainBounds(Bounds, Screen.FromRectangle(Bounds).WorkingArea);
-            if ((message.Msg == 0x001A || message.Msg == 0x031A) && ThemeChanged != null) ThemeChanged(this, EventArgs.Empty);
+            if ((message.Msg == 0x001A || message.Msg == 0x031A || message.Msg == 0x031E) && ThemeChanged != null) ThemeChanged(this, EventArgs.Empty);
         }
         internal bool CanDrag(Point point)
         {
@@ -128,7 +135,8 @@ namespace PeripheralBattery
         private void UpdateRegion()
         {
             Region previous = Region;
-            using (var path = UiDrawing.Rounded(new Rectangle(0, 0, Width, Height), 18)) Region = new Region(path);
+            if (Acrylic) Region = null;
+            else using (var path = UiDrawing.Rounded(new Rectangle(0, 0, Width, Height), 18)) Region = new Region(path);
             if (previous != null) previous.Dispose();
         }
         internal void ShowAtTray()
@@ -143,7 +151,7 @@ namespace PeripheralBattery
         {
             devices = rows; errors = failures; updated = DateTime.Now;
             int bottom = Bottom;
-            ClientSize = new Size(400, Math.Min(Math.Max(1, devices.Count), 5) * RowHeight + 112);
+            Size = new Size(400, Math.Min(Math.Max(1, devices.Count), 5) * RowHeight + 112);
             if (Visible)
             {
                 if (userPosition || moving) Bounds = ConstrainBounds(Bounds, Screen.FromRectangle(Bounds).WorkingArea);
@@ -168,7 +176,7 @@ namespace PeripheralBattery
             Cursor = refreshButton.Contains(pointer) || closeButton.Contains(pointer) ? Cursors.Hand : Cursors.Default;
             int index = (pointer.Y - ListTop + scroll) / RowHeight;
             string text = pointer.Y >= ListTop && pointer.Y < ListTop + ListHeight && index >= 0 && index < devices.Count
-                ? devices[index].Name + "\n" + devices[index].Connection + " · " + devices[index].Detail : "";
+                ? devices[index].Name + "\n" + devices[index].Connection + " · " + devices[index].Display : "";
             if (refreshButton.Contains(pointer)) text = "刷新电量";
             if (closeButton.Contains(pointer)) text = "收起";
             if (text != tooltipText) { tooltipText = text; toolTip.SetToolTip(this, text); }
@@ -185,12 +193,21 @@ namespace PeripheralBattery
         }
         private static void TextAt(Graphics graphics, string value, Font font, Color color, Rectangle rectangle, bool right)
         {
-            TextRenderer.DrawText(graphics, value, font, rectangle, color, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.PreserveGraphicsClipping | (right ? TextFormatFlags.Right : TextFormatFlags.Left));
+            UiDrawing.Text(graphics, value, font, color, rectangle, right ? StringAlignment.Far : StringAlignment.Near);
+        }
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            if (!Acrylic) base.OnPaintBackground(e);
         }
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            Graphics g = e.Graphics;
+            if (Acrylic) WindowBackdrop.Paint(e.Graphics, ClientSize, PaintContent);
+            else PaintContent(e.Graphics);
+        }
+        private void PaintContent(Graphics g)
+        {
+            if (Acrylic) using (var brush = new SolidBrush(WindowBackdrop.Tint(Appearance.Current))) g.FillRectangle(brush, ClientRectangle);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             TextAt(g, "设备电量", titleFont, Ink, new Rectangle(24, 18, 248, 34), false);
             if (refreshButton.Contains(pointer)) UiDrawing.FillRounded(g, refreshButton, 9, Appearance.Current.Hover);
@@ -219,8 +236,9 @@ namespace PeripheralBattery
         }
         private void DrawDevice(Graphics g, BatteryDevice device, int top)
         {
-            UiDrawing.FillRounded(g, new Rectangle(20, top, 360, 72), 14, Appearance.Current.Surface);
-            UiDrawing.FillRounded(g, new Rectangle(34, top + 16, 36, 36), 11, Appearance.Current.IconBackground);
+            Color surface = Acrylic ? Color.FromArgb(Appearance.Current.Dark ? 115 : 160, Appearance.Current.Surface) : Appearance.Current.Surface;
+            UiDrawing.FillRounded(g, new Rectangle(20, top, 360, 72), 14, surface);
+            UiDrawing.FillRounded(g, new Rectangle(34, top + 16, 36, 36), 11, Acrylic ? Color.FromArgb(150, Appearance.Current.IconBackground) : Appearance.Current.IconBackground);
             DrawDeviceIcon(g, device, 40, top + 22);
             TextAt(g, device.Name, nameFont, Ink, new Rectangle(82, top + 14, 202, 26), false);
             TextAt(g, device.Connection, smallFont, Muted, new Rectangle(83, top + 38, 175, 16), false);
@@ -241,8 +259,7 @@ namespace PeripheralBattery
                     else graphics.DrawArc(progress, circle, -90 + consumed, 360 - consumed);
                 }
             }
-            TextRenderer.DrawText(graphics, DevicePresentation.Level(device), font, Rectangle.Inflate(bounds, -6, -6), color,
-                TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            UiDrawing.Text(graphics, DevicePresentation.Level(device), font, color, Rectangle.Inflate(bounds, -6, -6), StringAlignment.Center);
         }
         private static void DrawDeviceIcon(Graphics g, BatteryDevice device, int left, int top)
         {

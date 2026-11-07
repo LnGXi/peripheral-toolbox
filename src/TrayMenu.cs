@@ -10,8 +10,10 @@ namespace PeripheralBattery
     internal sealed class TrayMenu : ContextMenuStrip
     {
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+        [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
         private readonly Font menuFont = new Font("Microsoft YaHei UI", 9.5F);
         internal Palette Palette { get { return Appearance.Current; } }
+        internal bool Acrylic { get; private set; }
         internal TrayMenu()
         {
             Font = menuFont;
@@ -20,6 +22,56 @@ namespace PeripheralBattery
             Padding = new Padding(6);
             AutoSize = false;
             Renderer = new MenuRenderer(() => Palette);
+            DoubleBuffered = true;
+        }
+        protected override CreateParams CreateParams
+        {
+            get { var parameters = base.CreateParams; parameters.Style |= WindowBackdrop.FrameStyle; return parameters; }
+        }
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            ApplyTheme();
+        }
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == 0x0083 && WindowBackdrop.Supported) { message.Result = IntPtr.Zero; return; }
+            // Menus do not take keyboard focus. Keep their frame visually active
+            // while open so the compositor also applies Acrylic to child menus.
+            if (message.Msg == 0x0086 && Acrylic && Visible) message.WParam = new IntPtr(1);
+            base.WndProc(ref message);
+            if (message.Msg == 0x0084) message.Result = new IntPtr(1);
+            if (message.Msg == 0x031E) ApplyTheme();
+        }
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            if (!Acrylic) base.OnPaintBackground(e);
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (Acrylic) WindowBackdrop.Paint(e.Graphics, ClientSize, PaintContent);
+            else base.OnPaint(e);
+        }
+        private void PaintContent(Graphics graphics)
+        {
+            Renderer.DrawToolStripBackground(new ToolStripRenderEventArgs(graphics, this));
+            foreach (ToolStripItem item in Items)
+            {
+                if (!item.Available) continue;
+                var state = graphics.Save();
+                graphics.TranslateTransform(item.Bounds.X, item.Bounds.Y);
+                var separator = item as ToolStripSeparator;
+                if (separator != null) Renderer.DrawSeparator(new ToolStripSeparatorRenderEventArgs(graphics, separator, false));
+                else
+                {
+                    Renderer.DrawMenuItemBackground(new ToolStripItemRenderEventArgs(graphics, item));
+                    Renderer.DrawItemText(new ToolStripItemTextRenderEventArgs(graphics, item, item.Text, item.ContentRectangle, item.ForeColor, item.Font, TextFormatFlags.Default));
+                    var menu = item as ToolStripMenuItem;
+                    if (menu != null && menu.HasDropDownItems) Renderer.DrawArrow(new ToolStripArrowRenderEventArgs(graphics, item, item.ContentRectangle, Palette.Muted, ArrowDirection.Right));
+                }
+                graphics.Restore(state);
+            }
+            Renderer.DrawToolStripBorder(new ToolStripRenderEventArgs(graphics, this));
         }
         internal ToolStripMenuItem AddAction(string text, string glyph, EventHandler clicked)
         {
@@ -31,6 +83,7 @@ namespace PeripheralBattery
         internal void ApplyTheme()
         {
             ApplyColors(this);
+            if (IsHandleCreated) { Acrylic = WindowBackdrop.Apply(Handle, Palette); UpdateRegion(); }
             Invalidate(true);
         }
         private void ApplyColors(ToolStrip strip)
@@ -51,7 +104,7 @@ namespace PeripheralBattery
         private void UpdateMenuSize()
         {
             foreach (ToolStripItem item in Items) item.Width = 220;
-            ClientSize = GetPreferredSize(Size.Empty);
+            Size = GetPreferredSize(Size.Empty);
         }
         public override Size GetPreferredSize(Size constrainingSize)
         {
@@ -69,6 +122,7 @@ namespace PeripheralBattery
         {
             base.OnOpened(e);
             UpdateMenuSize();
+            if (Acrylic) SendMessage(Handle, 0x0086, new IntPtr(1), IntPtr.Zero);
             BeginInvoke(new Action(AlignWithOwner));
         }
         private void AlignWithOwner()
@@ -86,9 +140,14 @@ namespace PeripheralBattery
         protected override void OnSizeChanged(EventArgs e)
         {
             base.OnSizeChanged(e);
+            UpdateRegion();
+        }
+        private void UpdateRegion()
+        {
             if (Width < 24 || Height < 24) return;
             Region previous = Region;
-            using (var path = UiDrawing.Rounded(ClientRectangle, 12)) Region = new Region(path);
+            if (Acrylic) Region = null;
+            else using (var path = UiDrawing.Rounded(ClientRectangle, 12)) Region = new Region(path);
             if (previous != null) previous.Dispose();
         }
         protected override void Dispose(bool disposing)
@@ -105,7 +164,10 @@ namespace PeripheralBattery
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            UiDrawing.FillRounded(e.Graphics, e.ToolStrip.ClientRectangle, 12, palette().Surface);
+            var menu = e.ToolStrip as TrayMenu;
+            bool acrylic = menu != null && menu.Acrylic;
+            Color background = acrylic ? WindowBackdrop.Tint(palette()) : palette().Surface;
+            UiDrawing.FillRounded(e.Graphics, e.ToolStrip.ClientRectangle, 12, background);
         }
         protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
         {
@@ -131,7 +193,7 @@ namespace PeripheralBattery
         {
             Palette colors = palette();
             Color textColor = e.Item.Enabled ? colors.Text : colors.Muted;
-            TextRenderer.DrawText(e.Graphics, e.Text, e.TextFont, new Rectangle(39, 0, e.Item.Width - 72, e.Item.Height), textColor, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            UiDrawing.Text(e.Graphics, e.Text, e.TextFont, textColor, new Rectangle(39, 0, e.Item.Width - 72, e.Item.Height), StringAlignment.Near);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             string glyph = e.Item.Tag as string;
             int left = 12, top = e.Item.Height / 2 - 8;

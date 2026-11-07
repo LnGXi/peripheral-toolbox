@@ -71,6 +71,18 @@ namespace PeripheralBattery
 
     internal static class UiDrawing
     {
+        internal static void Text(Graphics graphics, string value, Font font, Color color, Rectangle bounds, StringAlignment alignment)
+        {
+            using (var format = new StringFormat(StringFormat.GenericTypographic))
+            using (var brush = new SolidBrush(color))
+            {
+                format.FormatFlags |= StringFormatFlags.NoWrap;
+                format.Trimming = StringTrimming.EllipsisCharacter;
+                format.Alignment = alignment;
+                format.LineAlignment = StringAlignment.Center;
+                graphics.DrawString(value, font, brush, bounds, format);
+            }
+        }
         internal static GraphicsPath Rounded(Rectangle rectangle, int radius)
         {
             int diameter = radius * 2;
