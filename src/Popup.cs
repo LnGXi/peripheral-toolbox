@@ -29,6 +29,8 @@ namespace PeripheralBattery
         private Point pointer = new Point(-1, -1);
         private readonly ToolTip toolTip = new ToolTip { InitialDelay = 450 };
         private string tooltipText;
+        private bool userPosition, moving;
+        private Point moveOrigin;
         internal event EventHandler RefreshRequested;
         internal event EventHandler ThemeChanged;
 
@@ -38,6 +40,8 @@ namespace PeripheralBattery
             Native.SetProcessDPIAware();
             Text = "外设工具箱";
             FormBorderStyle = FormBorderStyle.None;
+            MaximizeBox = false;
+            MinimizeBox = false;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             ClientSize = new Size(400, 192);
@@ -78,8 +82,30 @@ namespace PeripheralBattery
         }
         protected override void WndProc(ref Message message)
         {
+            if (message.Msg == 0x0231) { moving = true; moveOrigin = Location; }
             base.WndProc(ref message);
+            if (message.Msg == 0x0084)
+            {
+                long coordinates = message.LParam.ToInt64();
+                var screen = new Point(unchecked((short)(coordinates & 0xFFFF)), unchecked((short)((coordinates >> 16) & 0xFFFF)));
+                if (CanDrag(PointToClient(screen))) message.Result = new IntPtr(2);
+            }
+            if (message.Msg == 0x0232 && moving)
+            {
+                userPosition = userPosition || Location != moveOrigin;
+                moving = false;
+            }
             if ((message.Msg == 0x001A || message.Msg == 0x031A) && ThemeChanged != null) ThemeChanged(this, EventArgs.Empty);
+        }
+        internal bool CanDrag(Point point)
+        {
+            return point.X >= 0 && point.X < Width && point.Y >= 0 && point.Y < ListTop
+                && !refreshButton.Contains(point) && !closeButton.Contains(point);
+        }
+        private Point ConstrainLocation(Point location)
+        {
+            Rectangle area = Screen.FromRectangle(new Rectangle(location, Size)).WorkingArea;
+            return new Point(Math.Max(area.Left, Math.Min(location.X, area.Right - Width)), Math.Max(area.Top, Math.Min(location.Y, area.Bottom - Height)));
         }
         protected override void OnSizeChanged(EventArgs e)
         {
@@ -95,7 +121,7 @@ namespace PeripheralBattery
         internal void ShowAtTray()
         {
             Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
-            Location = new Point(Math.Max(area.Left, area.Right - Width - 14), Math.Max(area.Top, area.Bottom - Height - 14));
+            Location = userPosition ? ConstrainLocation(Location) : new Point(Math.Max(area.Left, area.Right - Width - 14), Math.Max(area.Top, area.Bottom - Height - 14));
             Show(); Activate();
         }
         internal void Render(List<BatteryDevice> rows, List<string> failures)
@@ -103,7 +129,11 @@ namespace PeripheralBattery
             devices = rows; errors = failures; updated = DateTime.Now;
             int bottom = Bottom;
             ClientSize = new Size(400, ListHeight + 112);
-            if (Visible) Top = Math.Max(Screen.FromControl(this).WorkingArea.Top, bottom - Height);
+            if (Visible)
+            {
+                if (userPosition || moving) Location = ConstrainLocation(Location);
+                else Top = Math.Max(Screen.FromControl(this).WorkingArea.Top, bottom - Height);
+            }
             scroll = Math.Min(scroll, MaxScroll());
             Invalidate();
         }

@@ -38,7 +38,7 @@ namespace PeripheralBattery
             using (var key = Registry.CurrentUser.CreateSubKey(RunKey)) key.SetValue("PeripheralBattery", "\"" + ExePath + "\" --background");
             using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
             {
-                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.4.0");
+                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.5.0");
                 key.SetValue("UninstallString", "\"" + ExePath + "\" --uninstall"); key.SetValue("DisplayIcon", ExePath);
                 key.SetValue("NoModify", 1); key.SetValue("NoRepair", 1);
             }
@@ -65,6 +65,7 @@ namespace PeripheralBattery
         private readonly ToolStripMenuItem[] themeItems = new ToolStripMenuItem[3];
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 60000 };
         private readonly ScanWorker scanner = new ScanWorker();
+        private readonly LowBatteryAlerts lowBattery = LowBatteryAlerts.Load();
         private bool refreshing, exiting, applyingTheme;
         private Color trayColor;
         private int traySize;
@@ -91,6 +92,7 @@ namespace PeripheralBattery
             menu.Items.Add(new ToolStripSeparator { AutoSize = false, Size = new Size(220, 12) });
             menu.AddAction("退出", "exit", delegate { ExitThread(); });
             tray = new NotifyIcon { Text = "外设工具箱", Icon = CreateIcon(), ContextMenuStrip = menu, Visible = true };
+            tray.BalloonTipClicked += delegate { popup.ShowAtTray(); Refresh(); };
             trayColor = Appearance.TrayColor;
             traySize = SystemInformation.SmallIconSize.Width;
             menu.Opening += delegate { ApplyTheme(); startup.Checked = Install.Startup; };
@@ -146,6 +148,12 @@ namespace PeripheralBattery
                 popup.Render(devices, snapshot.Errors);
                 string summary = string.Join(" | ", devices.Select(d => d.Name + " " + d.Display));
                 tray.Text = summary.Length == 0 ? "外设工具箱 · 暂无设备" : summary.Substring(0, Math.Min(63, summary.Length));
+                var alerts = lowBattery.Pending(devices);
+                if (alerts.Count > 0)
+                {
+                    tray.ShowBalloonTip(10000, "外设工具箱 · 低电量", LowBatteryAlerts.Message(alerts), ToolTipIcon.Warning);
+                    lowBattery.MarkSent(alerts);
+                }
             }
             catch (Exception error) { if (!exiting) tray.Text = "外设工具箱 · 刷新失败"; System.Diagnostics.Debug.WriteLine(error); }
             finally { refreshing = false; }
