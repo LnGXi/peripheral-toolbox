@@ -12,13 +12,16 @@ namespace PeripheralBattery
         private static readonly Color Ink = Color.FromArgb(27, 34, 44);
         private static readonly Color Muted = Color.FromArgb(132, 140, 153);
         private static readonly Color Accent = Color.FromArgb(27, 159, 121);
-        private readonly Font titleFont = new Font("Microsoft YaHei UI", 17, FontStyle.Bold);
-        private readonly Font nameFont = new Font("Microsoft YaHei UI", 10, FontStyle.Bold);
+        private readonly Font titleFont = new Font("Microsoft YaHei UI", 13, FontStyle.Bold);
+        private readonly Font nameFont = new Font("Microsoft YaHei UI", 9.5F);
         private readonly Font bodyFont = new Font("Microsoft YaHei UI", 9);
         private readonly Font smallFont = new Font("Microsoft YaHei UI", 8);
-        private readonly Font numberFont = new Font("Segoe UI", 23, FontStyle.Bold);
-        private readonly Rectangle refreshButton = new Rectangle(278, 25, 70, 34);
-        private readonly Rectangle closeButton = new Rectangle(354, 25, 30, 34);
+        private readonly Font numberFont = new Font("Segoe UI", 27, FontStyle.Bold);
+        private readonly Rectangle refreshButton = new Rectangle(312, 20, 30, 30);
+        private readonly Rectangle closeButton = new Rectangle(352, 20, 30, 30);
+        private const int ListTop = 68;
+        private const int RowHeight = 80;
+        private int ListHeight { get { return Math.Min(Math.Max(1, devices.Count), 5) * RowHeight; } }
         private List<BatteryDevice> devices = new List<BatteryDevice>();
         private List<string> errors = new List<string>();
         private DateTime? updated;
@@ -36,7 +39,7 @@ namespace PeripheralBattery
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            ClientSize = new Size(400, 544);
+            ClientSize = new Size(400, 192);
             BackColor = Color.FromArgb(246, 248, 250);
             DoubleBuffered = true;
             SetStyle(ControlStyles.ResizeRedraw, true);
@@ -52,7 +55,18 @@ namespace PeripheralBattery
             base.OnHandleCreated(e);
             int rounded = 2;
             DwmSetWindowAttribute(Handle, 33, ref rounded, 4);
+            UpdateRegion();
+        }
+        protected override void OnSizeChanged(EventArgs e)
+        {
+            base.OnSizeChanged(e);
+            if (IsHandleCreated) UpdateRegion();
+        }
+        private void UpdateRegion()
+        {
+            Region previous = Region;
             using (var path = Rounded(new Rectangle(0, 0, Width, Height), 18)) Region = new Region(path);
+            if (previous != null) previous.Dispose();
         }
         internal void ShowAtTray()
         {
@@ -63,10 +77,13 @@ namespace PeripheralBattery
         internal void Render(List<BatteryDevice> rows, List<string> failures)
         {
             devices = rows; errors = failures; updated = DateTime.Now;
+            int bottom = Bottom;
+            ClientSize = new Size(400, ListHeight + 112);
+            if (Visible) Top = Math.Max(Screen.FromControl(this).WorkingArea.Top, bottom - Height);
             scroll = Math.Min(scroll, MaxScroll());
             Invalidate();
         }
-        private int MaxScroll() { return Math.Max(0, devices.Count * 118 - 354); }
+        private int MaxScroll() { return Math.Max(0, devices.Count * RowHeight - ListHeight); }
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
@@ -77,8 +94,11 @@ namespace PeripheralBattery
         {
             base.OnMouseMove(e); pointer = e.Location;
             Cursor = refreshButton.Contains(pointer) || closeButton.Contains(pointer) ? Cursors.Hand : Cursors.Default;
-            int index = (pointer.Y - 103 + scroll) / 118;
-            string text = pointer.Y >= 103 && pointer.Y < 457 && index >= 0 && index < devices.Count ? devices[index].Name + "\n" + devices[index].Detail : "";
+            int index = (pointer.Y - ListTop + scroll) / RowHeight;
+            string text = pointer.Y >= ListTop && pointer.Y < ListTop + ListHeight && index >= 0 && index < devices.Count
+                ? devices[index].Name + "\n" + devices[index].Connection + " · " + devices[index].Detail : "";
+            if (refreshButton.Contains(pointer)) text = "刷新电量";
+            if (closeButton.Contains(pointer)) text = "收起";
             if (text != tooltipText) { tooltipText = text; toolTip.SetToolTip(this, text); }
             Invalidate();
         }
@@ -115,56 +135,49 @@ namespace PeripheralBattery
             base.OnPaint(e);
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            TextAt(g, "外设工具箱", titleFont, Ink, new Rectangle(24, 21, 248, 36), false);
-            TextAt(g, devices.Count + " 台设备  ·  每分钟自动更新", bodyFont, Muted, new Rectangle(25, 65, 330, 22), false);
-            FillRounded(g, refreshButton, 10, refreshButton.Contains(pointer) ? Color.FromArgb(224, 230, 235) : Color.FromArgb(235, 239, 243));
-            TextAt(g, "刷新", bodyFont, Ink, refreshButton, true);
+            TextAt(g, "设备电量", titleFont, Ink, new Rectangle(24, 18, 248, 34), false);
+            if (refreshButton.Contains(pointer)) FillRounded(g, refreshButton, 9, Color.FromArgb(229, 234, 239));
+            if (closeButton.Contains(pointer)) FillRounded(g, closeButton, 9, Color.FromArgb(229, 234, 239));
             using (var pen = new Pen(Color.FromArgb(101, 113, 126), 1.5F))
             {
-                g.DrawArc(pen, 288, 36, 11, 11, 35, 285);
-                g.DrawLines(pen, new[] { new Point(298, 34), new Point(299, 39), new Point(294, 39) });
-                g.DrawLine(pen, 365, 38, 373, 46); g.DrawLine(pen, 373, 38, 365, 46);
+                g.DrawArc(pen, 320, 28, 13, 13, 35, 285);
+                g.DrawLines(pen, new[] { new Point(331, 26), new Point(333, 32), new Point(327, 32) });
+                g.DrawLine(pen, 363, 31, 371, 39); g.DrawLine(pen, 371, 31, 363, 39);
             }
             var state = g.Save();
-            g.SetClip(new Rectangle(0, 103, Width, 354));
-            for (int i = 0; i < devices.Count; i++) DrawDevice(g, devices[i], 103 + i * 118 - scroll);
+            g.SetClip(new Rectangle(0, ListTop, Width, ListHeight));
+            for (int i = 0; i < devices.Count; i++) DrawDevice(g, devices[i], ListTop + i * RowHeight - scroll);
             if (devices.Count == 0)
             {
-                TextAt(g, updated.HasValue ? "连接外设后，在这里查看电量" : "正在发现你的设备…", bodyFont, Muted, new Rectangle(24, 232, 352, 40), false);
+                TextAt(g, updated.HasValue ? "暂无设备" : "正在读取…", bodyFont, Muted, new Rectangle(24, ListTop, 352, ListHeight), false);
             }
             g.Restore(state);
             if (MaxScroll() > 0)
             {
-                int height = Math.Max(28, 354 * 354 / (devices.Count * 118));
-                int top = 103 + scroll * (354 - height) / MaxScroll();
+                int height = Math.Max(28, ListHeight * ListHeight / (devices.Count * RowHeight));
+                int top = ListTop + scroll * (ListHeight - height) / MaxScroll();
                 FillRounded(g, new Rectangle(393, top, 3, height), 1, Color.FromArgb(200, 208, 215));
             }
-            using (var pen = new Pen(Color.FromArgb(229, 233, 238))) g.DrawLine(pen, 25, 476, 375, 476);
-            using (var brush = new SolidBrush(errors.Count == 0 ? Accent : Color.FromArgb(221, 149, 55))) g.FillEllipse(brush, 25, 497, 6, 6);
-            TextAt(g, updated.HasValue ? updated.Value.ToString("HH:mm") + " 更新" : "正在读取", smallFont, Muted, new Rectangle(39, 488, 125, 24), false);
-            TextAt(g, errors.Count == 0 ? "右键托盘 · 更多设置" : "部分设备读取失败", smallFont, Muted, new Rectangle(170, 488, 205, 24), true);
+            TextAt(g, errors.Count > 0 ? "部分读取失败" : updated.HasValue ? updated.Value.ToString("HH:mm") + " 更新" : "正在读取", smallFont, Muted, new Rectangle(24, Height - 36, 352, 24), true);
         }
         private void DrawDevice(Graphics g, BatteryDevice device, int top)
         {
-            FillRounded(g, new Rectangle(20, top, 360, 106), 14, Color.White);
-            FillRounded(g, new Rectangle(34, top + 17, 40, 40), 12, Color.FromArgb(239, 244, 247));
-            DrawDeviceIcon(g, device, 43, top + 25);
-            TextAt(g, device.Name, nameFont, Ink, new Rectangle(86, top + 16, 188, 24), false);
-            TextAt(g, device.Connection, smallFont, Muted, new Rectangle(86, top + 40, 180, 20), false);
+            FillRounded(g, new Rectangle(20, top, 360, 72), 14, Color.White);
+            FillRounded(g, new Rectangle(34, top + 16, 36, 36), 11, Color.FromArgb(239, 244, 247));
+            DrawDeviceIcon(g, device, 40, top + 22);
+            TextAt(g, device.Name, nameFont, Ink, new Rectangle(82, top + 14, 166, 26), false);
             if (device.Percent.HasValue)
             {
                 Color color = device.Percent.Value <= 20 ? Color.FromArgb(218, 133, 52) : Accent;
-                TextAt(g, device.Percent.Value.ToString(), numberFont, Ink, new Rectangle(272, top + 13, 68, 39), true);
-                TextAt(g, "%", smallFont, Muted, new Rectangle(343, top + 28, 17, 21), false);
-                FillRounded(g, new Rectangle(35, top + 78, 330, 4), 2, Color.FromArgb(235, 240, 243));
-                int width = (int)Math.Round(330 * device.Percent.Value / 100.0);
-                if (width >= 4) FillRounded(g, new Rectangle(35, top + 78, width, 4), 2, color);
-                TextAt(g, device.Detail, smallFont, Muted, new Rectangle(35, top + 85, 330, 17), false);
+                TextAt(g, device.Percent.Value.ToString(), numberFont, color, new Rectangle(250, top + 9, 96, 46), true);
+                TextAt(g, "%", bodyFont, color, new Rectangle(348, top + 28, 17, 21), false);
+                FillRounded(g, new Rectangle(83, top + 48, 175, 4), 2, Color.FromArgb(235, 240, 243));
+                int width = (int)Math.Round(175 * device.Percent.Value / 100.0);
+                if (width >= 4) FillRounded(g, new Rectangle(83, top + 48, width, 4), 2, color);
             }
             else
             {
-                TextAt(g, device.Level ?? "—", bodyFont, Muted, new Rectangle(276, top + 24, 84, 26), true);
-                TextAt(g, device.Detail, smallFont, Muted, new Rectangle(35, top + 74, 330, 22), false);
+                TextAt(g, device.Level ?? "未读取", bodyFont, Muted, new Rectangle(276, top + 22, 84, 26), true);
             }
         }
         private static void DrawDeviceIcon(Graphics g, BatteryDevice device, int left, int top)

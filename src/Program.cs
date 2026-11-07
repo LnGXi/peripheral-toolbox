@@ -35,7 +35,7 @@ namespace PeripheralBattery
             using (var key = Registry.CurrentUser.CreateSubKey(RunKey)) key.SetValue("PeripheralBattery", "\"" + ExePath + "\" --background");
             using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
             {
-                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.1.0");
+                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.1.1");
                 key.SetValue("UninstallString", "\"" + ExePath + "\" --uninstall"); key.SetValue("DisplayIcon", ExePath);
                 key.SetValue("NoModify", 1); key.SetValue("NoRepair", 1);
             }
