@@ -2,12 +2,14 @@ using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace PeripheralBattery
 {
     internal sealed class TrayMenu : ContextMenuStrip
     {
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
         private readonly Font menuFont = new Font("Microsoft YaHei UI", 9.5F);
         internal Palette Palette { get { return Appearance.Current; } }
         internal TrayMenu()
@@ -16,6 +18,7 @@ namespace PeripheralBattery
             ShowImageMargin = false;
             ShowCheckMargin = false;
             Padding = new Padding(6);
+            AutoSize = false;
             Renderer = new MenuRenderer(() => Palette);
         }
         internal ToolStripMenuItem AddAction(string text, string glyph, EventHandler clicked)
@@ -45,7 +48,41 @@ namespace PeripheralBattery
                 ApplyColors(menu.DropDown);
             }
         }
-        protected override void OnOpening(CancelEventArgs e) { ApplyTheme(); base.OnOpening(e); }
+        private void UpdateMenuSize()
+        {
+            foreach (ToolStripItem item in Items) item.Width = 220;
+            ClientSize = GetPreferredSize(Size.Empty);
+        }
+        public override Size GetPreferredSize(Size constrainingSize)
+        {
+            int height = Padding.Vertical;
+            foreach (ToolStripItem item in Items) if (item.Available) height += item.Height;
+            return new Size(220 + Padding.Horizontal, height);
+        }
+        protected override void OnOpening(CancelEventArgs e)
+        {
+            UpdateMenuSize();
+            ApplyTheme();
+            base.OnOpening(e);
+        }
+        protected override void OnOpened(EventArgs e)
+        {
+            base.OnOpened(e);
+            UpdateMenuSize();
+            BeginInvoke(new Action(AlignWithOwner));
+        }
+        private void AlignWithOwner()
+        {
+            if (IsDisposed || !Visible || OwnerItem == null || OwnerItem.Owner == null) return;
+            Rectangle parent = OwnerItem.Owner.RectangleToScreen(OwnerItem.Owner.ClientRectangle);
+            Rectangle item = OwnerItem.Owner.RectangleToScreen(OwnerItem.Bounds);
+            Rectangle screen = Screen.FromRectangle(item).WorkingArea;
+            int x = parent.Right - 1;
+            if (x + Width > screen.Right) x = parent.Left - Width + 1;
+            x = Math.Max(screen.Left, Math.Min(x, screen.Right - Width));
+            int y = Math.Max(screen.Top, Math.Min(item.Top - Padding.Top, screen.Bottom - Height));
+            SetWindowPos(Handle, IntPtr.Zero, x, y, 0, 0, 0x0015);
+        }
         protected override void OnSizeChanged(EventArgs e)
         {
             base.OnSizeChanged(e);

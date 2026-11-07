@@ -116,7 +116,9 @@ namespace PeripheralBattery
         }
         protected override void OnMouseMove(MouseEventArgs e)
         {
-            base.OnMouseMove(e); pointer = e.Location;
+            base.OnMouseMove(e);
+            bool oldRefresh = refreshButton.Contains(pointer), oldClose = closeButton.Contains(pointer);
+            pointer = e.Location;
             Cursor = refreshButton.Contains(pointer) || closeButton.Contains(pointer) ? Cursors.Hand : Cursors.Default;
             int index = (pointer.Y - ListTop + scroll) / RowHeight;
             string text = pointer.Y >= ListTop && pointer.Y < ListTop + ListHeight && index >= 0 && index < devices.Count
@@ -124,7 +126,8 @@ namespace PeripheralBattery
             if (refreshButton.Contains(pointer)) text = "刷新电量";
             if (closeButton.Contains(pointer)) text = "收起";
             if (text != tooltipText) { tooltipText = text; toolTip.SetToolTip(this, text); }
-            Invalidate();
+            if (oldRefresh != refreshButton.Contains(pointer)) Invalidate(refreshButton);
+            if (oldClose != closeButton.Contains(pointer)) Invalidate(closeButton);
         }
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); pointer = new Point(-1, -1); Invalidate(); }
         protected override void OnMouseClick(MouseEventArgs e)

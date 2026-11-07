@@ -93,13 +93,13 @@ namespace PeripheralBattery
             graphics.TranslateTransform(rectangle.X, rectangle.Y);
             graphics.ScaleTransform(rectangle.Width / 24F, rectangle.Height / 24F);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var pen = new Pen(color, 2) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            using (var pen = new Pen(color, 2.25F) { StartCap = LineCap.Round, EndCap = LineCap.Round })
             using (var brush = new SolidBrush(color))
             {
-                graphics.DrawArc(pen, 3, 3, 18, 18, -62, 300);
+                graphics.DrawArc(pen, 1.8F, 1.8F, 20.4F, 20.4F, -62, 300);
                 graphics.FillPolygon(brush, new[] {
-                    new PointF(13.7F, 6.2F), new PointF(8.1F, 12.7F), new PointF(11.5F, 12.7F),
-                    new PointF(10.3F, 18), new PointF(16, 10.8F), new PointF(12.5F, 10.8F)
+                    new PointF(13.9F, 5.5F), new PointF(7.6F, 12.8F), new PointF(11.4F, 12.8F),
+                    new PointF(10.1F, 18.7F), new PointF(16.5F, 10.7F), new PointF(12.6F, 10.7F)
                 });
             }
             graphics.Restore(state);

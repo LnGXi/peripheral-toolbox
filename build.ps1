@@ -10,6 +10,6 @@ foreach ($name in @('System.Runtime', 'System.Collections', 'System.Runtime.Inte
     if (!$assembly) { throw "Required Windows runtime assembly missing: $name" }
     $references += '/r:' + $assembly.FullName
 }
-& $compiler /nologo /target:winexe /platform:anycpu /optimize+ "/out:$PSScriptRoot\PeripheralBattery.exe" "/win32manifest:$PSScriptRoot\src\app.manifest" $references $sources
+& $compiler /nologo /target:winexe /platform:anycpu /optimize+ "/out:$PSScriptRoot\PeripheralBattery.exe" "/win32manifest:$PSScriptRoot\src\app.manifest" "/win32icon:$PSScriptRoot\assets\app.ico" $references $sources
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 Get-Item -LiteralPath (Join-Path $PSScriptRoot 'PeripheralBattery.exe') | Select-Object Name, Length

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -12,6 +13,7 @@ namespace PeripheralBattery
 {
     internal static class Install
     {
+        [DllImport("shell32.dll", CharSet=CharSet.Unicode)] private static extern void SHChangeNotify(uint change, uint flags, string path, IntPtr item);
         private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\PeripheralBattery";
         internal static string DirectoryPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PeripheralBattery"); } }
@@ -32,10 +34,11 @@ namespace PeripheralBattery
         {
             Directory.CreateDirectory(DirectoryPath);
             File.Copy(Application.ExecutablePath, ExePath, true);
+            SHChangeNotify(0x2000, 0x0005, ExePath, IntPtr.Zero);
             using (var key = Registry.CurrentUser.CreateSubKey(RunKey)) key.SetValue("PeripheralBattery", "\"" + ExePath + "\" --background");
             using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
             {
-                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.3.0");
+                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.4.0");
                 key.SetValue("UninstallString", "\"" + ExePath + "\" --uninstall"); key.SetValue("DisplayIcon", ExePath);
                 key.SetValue("NoModify", 1); key.SetValue("NoRepair", 1);
             }
@@ -61,7 +64,10 @@ namespace PeripheralBattery
         private readonly ToolStripMenuItem startup;
         private readonly ToolStripMenuItem[] themeItems = new ToolStripMenuItem[3];
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 60000 };
+        private readonly ScanWorker scanner = new ScanWorker();
         private bool refreshing, exiting, applyingTheme;
+        private Color trayColor;
+        private int traySize;
         internal TrayApp(bool welcome)
         {
             menu.AddAction("查看设备", "devices", delegate { popup.ShowAtTray(); Refresh(); });
@@ -85,6 +91,8 @@ namespace PeripheralBattery
             menu.Items.Add(new ToolStripSeparator { AutoSize = false, Size = new Size(220, 12) });
             menu.AddAction("退出", "exit", delegate { ExitThread(); });
             tray = new NotifyIcon { Text = "外设工具箱", Icon = CreateIcon(), ContextMenuStrip = menu, Visible = true };
+            trayColor = Appearance.TrayColor;
+            traySize = SystemInformation.SmallIconSize.Width;
             menu.Opening += delegate { ApplyTheme(); startup.Checked = Install.Startup; };
             tray.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { ApplyTheme(); if (popup.Visible) popup.Hide(); else { popup.ShowAtTray(); Refresh(); } } };
             popup.ThemeChanged += delegate { ApplyTheme(); };
@@ -115,9 +123,14 @@ namespace PeripheralBattery
                 popup.ApplyTheme();
                 for (int i = 0; i < themeItems.Length; i++) themeItems[i].Checked = Appearance.Mode == (ThemeMode)i;
                 menu.ApplyTheme();
-                Icon previous = tray.Icon;
-                tray.Icon = CreateIcon();
-                if (previous != null) previous.Dispose();
+                if (trayColor != Appearance.TrayColor || traySize != SystemInformation.SmallIconSize.Width)
+                {
+                    Icon previous = tray.Icon;
+                    tray.Icon = CreateIcon();
+                    if (previous != null) previous.Dispose();
+                    trayColor = Appearance.TrayColor;
+                    traySize = SystemInformation.SmallIconSize.Width;
+                }
             }
             finally { applyingTheme = false; }
         }
@@ -127,10 +140,10 @@ namespace PeripheralBattery
             refreshing = true;
             try
             {
-                List<string> errors = null;
-                var devices = await Task.Run(() => Scanner.Scan(out errors));
+                var snapshot = await Task.Run(() => scanner.Scan());
                 if (exiting) return;
-                popup.Render(devices, errors);
+                var devices = snapshot.Devices;
+                popup.Render(devices, snapshot.Errors);
                 string summary = string.Join(" | ", devices.Select(d => d.Name + " " + d.Display));
                 tray.Text = summary.Length == 0 ? "外设工具箱 · 暂无设备" : summary.Substring(0, Math.Min(63, summary.Length));
             }
@@ -140,12 +153,23 @@ namespace PeripheralBattery
         protected override void ExitThreadCore()
         {
             exiting = true; timer.Stop(); timer.Dispose(); tray.Visible = false;
+            scanner.Dispose();
             Icon icon = tray.Icon; tray.Dispose(); icon.Dispose(); menu.Dispose(); popup.Dispose(); base.ExitThreadCore();
         }
     }
     internal static class Program
     {
         [STAThread] private static void Main(string[] args)
+        {
+            if (args.Length == 1 && args[0] == "--scan-worker")
+            {
+                try { ScanWorker.Run(); }
+                catch (Exception) { Environment.ExitCode = 1; }
+                return;
+            }
+            RunApplication(args);
+        }
+        private static void RunApplication(string[] args)
         {
             Native.SetProcessDPIAware(); Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             try
