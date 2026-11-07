@@ -26,8 +26,10 @@ namespace PeripheralBattery
         private DateTime? updated;
         private int scroll;
         private Point pointer = new Point(-1, -1);
-        private readonly ToolTip toolTip = new ToolTip { InitialDelay = 450 };
+        private readonly ToolTip toolTip = new ToolTip { UseAnimation = false, UseFading = false };
+        private readonly Timer tooltipTimer = new Timer { Interval = 450 };
         private string tooltipText;
+        private bool tooltipVisible;
         private bool userPosition, moving;
         internal bool Acrylic { get; private set; }
         private Point moveOrigin;
@@ -50,6 +52,7 @@ namespace PeripheralBattery
             DoubleBuffered = true;
             SetStyle(ControlStyles.ResizeRedraw, true);
             toolTip.OwnerDraw = true;
+            tooltipTimer.Tick += TooltipTick;
             toolTip.Draw += delegate(object sender, DrawToolTipEventArgs e)
             {
                 using (var brush = new SolidBrush(Appearance.Current.Surface)) e.Graphics.FillRectangle(brush, e.Bounds);
@@ -97,7 +100,8 @@ namespace PeripheralBattery
                 message.Result = new IntPtr(1);
                 return;
             }
-            if (message.Msg == 0x0231) { moving = true; moveOrigin = Location; }
+            if (message.Msg == 0x00A0) ClearTooltip();
+            if (message.Msg == 0x0231) { ClearTooltip(); moving = true; moveOrigin = Location; }
             base.WndProc(ref message);
             if (message.Msg == 0x0084)
             {
@@ -149,6 +153,7 @@ namespace PeripheralBattery
         }
         internal void Render(List<BatteryDevice> rows, List<string> failures)
         {
+            ClearTooltip();
             devices = rows; errors = failures; updated = DateTime.Now;
             int bottom = Bottom;
             Size = new Size(400, Math.Min(Math.Max(1, devices.Count), 5) * RowHeight + 112);
@@ -165,6 +170,7 @@ namespace PeripheralBattery
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
+            ClearTooltip();
             scroll = Math.Max(0, Math.Min(MaxScroll(), scroll - e.Delta / 3));
             Invalidate();
         }
@@ -175,15 +181,52 @@ namespace PeripheralBattery
             pointer = e.Location;
             Cursor = refreshButton.Contains(pointer) || closeButton.Contains(pointer) ? Cursors.Hand : Cursors.Default;
             int index = (pointer.Y - ListTop + scroll) / RowHeight;
-            string text = pointer.Y >= ListTop && pointer.Y < ListTop + ListHeight && index >= 0 && index < devices.Count
+            bool card = pointer.X >= 20 && pointer.X < 380 && pointer.Y >= ListTop && pointer.Y < ListTop + ListHeight
+                && index >= 0 && index < devices.Count && pointer.Y < ListTop + index * RowHeight - scroll + 72;
+            string text = card
                 ? devices[index].Name + "\n" + devices[index].Connection + " · " + devices[index].Display : "";
             if (refreshButton.Contains(pointer)) text = "刷新电量";
             if (closeButton.Contains(pointer)) text = "收起";
-            if (text != tooltipText) { tooltipText = text; toolTip.SetToolTip(this, text); }
+            if (text != tooltipText)
+            {
+                ClearTooltip();
+                tooltipText = text;
+                if (Visible && !moving && text.Length > 0) { tooltipTimer.Interval = 450; tooltipTimer.Start(); }
+            }
             if (oldRefresh != refreshButton.Contains(pointer)) Invalidate(refreshButton);
             if (oldClose != closeButton.Contains(pointer)) Invalidate(closeButton);
         }
-        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); pointer = new Point(-1, -1); Invalidate(); }
+        private void ClearTooltip()
+        {
+            if (Disposing || IsDisposed) return;
+            tooltipTimer.Stop();
+            toolTip.Hide(this);
+            tooltipVisible = false;
+            tooltipText = null;
+        }
+        private void TooltipTick(object sender, EventArgs e)
+        {
+            tooltipTimer.Stop();
+            if (tooltipVisible || !Visible || moving || string.IsNullOrEmpty(tooltipText))
+            {
+                toolTip.Hide(this);
+                tooltipVisible = false;
+                return;
+            }
+            // The same target stays dismissed after expiry until the pointer
+            // enters another target. Mouse movement cannot keep extending it.
+            toolTip.Show(tooltipText, this, new Point(pointer.X + 12, pointer.Y + 22), 2500);
+            tooltipVisible = true;
+            tooltipTimer.Interval = 2500;
+            tooltipTimer.Start();
+        }
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            ClearTooltip();
+        }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); ClearTooltip(); pointer = new Point(-1, -1); Invalidate(); }
+        protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); ClearTooltip(); }
         protected override void OnMouseClick(MouseEventArgs e)
         {
             base.OnMouseClick(e);
@@ -297,7 +340,7 @@ namespace PeripheralBattery
         }
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { titleFont.Dispose(); nameFont.Dispose(); bodyFont.Dispose(); smallFont.Dispose(); numberFont.Dispose(); toolTip.Dispose(); }
+            if (disposing) { tooltipTimer.Stop(); tooltipTimer.Dispose(); titleFont.Dispose(); nameFont.Dispose(); bodyFont.Dispose(); smallFont.Dispose(); numberFont.Dispose(); toolTip.Dispose(); }
             base.Dispose(disposing);
         }
     }

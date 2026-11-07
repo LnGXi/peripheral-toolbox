@@ -14,7 +14,7 @@ foreach ($name in @('System.Runtime', 'System.Collections', 'System.Runtime.Inte
 & $compiler /nologo /target:winexe /platform:anycpu /optimize+ "/out:$PSScriptRoot\PeripheralBattery.exe" "/win32manifest:$PSScriptRoot\src\app.manifest" "/win32icon:$PSScriptRoot\assets\app.ico" $references $sources
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 if ($Verify) {
-    foreach ($test in @('DiscoveryRegression', 'AppearanceRegression')) {
+    foreach ($test in @('DiscoveryRegression', 'AppearanceRegression', 'TooltipRegression')) {
         $testFile = Join-Path ([IO.Path]::GetTempPath()) ("peripheral-check-" + [Guid]::NewGuid() + '.exe')
         try {
             & $compiler /nologo /target:exe "/main:$test" "/out:$testFile" "/win32manifest:$PSScriptRoot\src\app.manifest" $references $sources (Join-Path $PSScriptRoot "tests\$test.cs")
