@@ -23,6 +23,9 @@ Windows“已安装的应用”中可卸载“外设工具箱 Peripheral Toolbox
 | 读取方式 | 适用范围 | 当前状态 |
 | --- | --- | --- |
 | Windows 设备电量 | 系统上报电量的蓝牙设备 | 已实现，按物理设备连接状态过滤 |
+| Windows 蓝牙实时属性 | 已连接的经典蓝牙和 BLE 设备 | 已实现，作为系统属性的另一来源 |
+| BLE 标准电池服务直读 | 提供 Battery Service / Battery Level 的已连接设备 | 已实现，直接读取设备，兼容设备待实测 |
+| 漫步者厂商蓝牙服务 | 提供 EDF00000 控制服务的已连接耳机 | W820NB 双金标版已实测成功 |
 | 标准 HID Battery Strength | 描述符中声明标准电池 Feature 报告的设备 | 已实现，待兼容设备实测 |
 | XInput 电池接口 | Xbox 及兼容手柄 | 已实现，保留低、中、满等档位 |
 | DualSense HID 报告 | 原装 DualSense、DualSense Edge，USB 或蓝牙 | 已实现，报文解析已测试，实机待验证 |
@@ -44,11 +47,15 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 源码采用 C# 与 WinForms，无 NuGet 包依赖。`IBatteryProvider` 接入系统级数据来源，`IHidBatteryReader` 接入设备协议。设备枚举按容器合并多个 HID 接口。添加品牌适配时应匹配具体协议接口并校验回复，仅发送已确认的电量查询。
 
+增强蓝牙读取使用 Windows 自带的 WinRT 蓝牙、网络和流接口，构建脚本引用系统元数据和 .NET Framework 程序集。运行时持续保留系统属性读取作为回退。查询设有超时，单个设备失败后继续其他设备。漫步者查询匹配厂商服务 UUID 与物理地址，并校验返回帧。
+
 发布时在本地构建 EXE，并将它与 SHA256 校验值上传到 GitHub Release。
 
 ## 第一版验证记录
 
 2026-11-07，本机 ATK 接收器读取到 74%，飞智黑武士 5 Pro 接收器读取到 100%（20% 档位）。EXE 约 36 KB。初版界面的短时后台工作集约 42 MB，打开界面后约 59 MB。3 秒空闲采样的 CPU 时间增量为 0。测量结果随系统与设备变化。
+
+v0.2.0 在 Windows 电量属性为空时，通过漫步者厂商服务实际读取 W820NB 双金标版电量 56%。本次增强的 EXE 约 44 KB。其他漫步者型号和 BLE 标准服务仍需设备实测。
 
 已检查 USB/蓝牙 DualSense 报文解析、异常电池值、短报文、未知接收器匹配、本机设备扫描、安装和自启注册。DualSense 和其他品牌设备仍需实机验证。
 
@@ -60,5 +67,7 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 - 标准 HID 值解析。[Microsoft 文档](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/hidpi/nf-hidpi-hidp_getusagevalue)
 - ATK 报文说明与开源实现。[atk-tool-plus](https://github.com/papelblume/atk-tool-plus)
 - DualSense 报文说明与开源实现。[SDL](https://github.com/libsdl-org/SDL/blob/main/src/joystick/hidapi/SDL_hidapi_ps5.c)
+- 漫步者电量帧与服务 UUID 资料，C# 查询实现独立编写。[mEDIFIER](https://github.com/wh201906/mEDIFIER)
+- BLE 标准电池服务与直接读取接口。[Microsoft 文档](https://learn.microsoft.com/en-us/windows/uwp/devices-sensors/gatt-client)
 
 应用以 MIT 许可证发布。协议参考项目的授权说明见 THIRD_PARTY_NOTICES.md。

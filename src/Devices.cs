@@ -9,7 +9,7 @@ namespace PeripheralBattery
 {
     internal sealed class BatteryDevice
     {
-        public string Id, Name, Connection, Detail, Level;
+        public string Id, Name, Connection, Detail, Level, Address;
         public int? Percent;
         public string Display { get { return Percent.HasValue ? Percent + "%" : (Level ?? "暂不支持读取"); } }
     }
@@ -269,7 +269,7 @@ namespace PeripheralBattery
     }
     internal static class Scanner
     {
-        internal static readonly IBatteryProvider[] Providers = { new WindowsProvider(), new HidProvider(), new XInputProvider() };
+        internal static readonly IBatteryProvider[] Providers = { new BluetoothProvider(), new WindowsProvider(), new HidProvider(), new XInputProvider() };
         internal static List<BatteryDevice> Scan(out List<string> errors)
         {
             errors = new List<string>(); var rows = new List<BatteryDevice>();

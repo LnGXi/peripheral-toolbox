@@ -1,5 +1,7 @@
 # Protocol references
 
+The Edifier Bluetooth service UUID, battery request, reply format and checksum were checked against wh201906/mEDIFIER (https://github.com/wh201906/mEDIFIER). The C# implementation is independently written. No mEDIFIER source or binary is included.
+
 The ATK packet implementation was independently written in C# using the protocol documented by papelblume/atk-tool-plus. DualSense packet offsets and battery interpretation were checked against SDL. Acknowledgments and their license notices follow.
 
 ## atk-tool-plus
