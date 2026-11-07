@@ -1,3 +1,4 @@
+param([switch]$Verify)
 $ErrorActionPreference = 'Stop'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $sources = Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' | Select-Object -ExpandProperty FullName
@@ -12,4 +13,14 @@ foreach ($name in @('System.Runtime', 'System.Collections', 'System.Runtime.Inte
 }
 & $compiler /nologo /target:winexe /platform:anycpu /optimize+ "/out:$PSScriptRoot\PeripheralBattery.exe" "/win32manifest:$PSScriptRoot\src\app.manifest" "/win32icon:$PSScriptRoot\assets\app.ico" $references $sources
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+if ($Verify) {
+    $testFile = Join-Path ([IO.Path]::GetTempPath()) ("peripheral-discovery-" + [Guid]::NewGuid() + '.exe')
+    try {
+        & $compiler /nologo /target:exe /main:DiscoveryRegression "/out:$testFile" $references $sources (Join-Path $PSScriptRoot 'tests\DiscoveryRegression.cs')
+        if ($LASTEXITCODE -ne 0) { throw 'Regression test build failed' }
+        & $testFile
+        if ($LASTEXITCODE -ne 0) { throw 'Regression test failed' }
+    }
+    finally { if (Test-Path -LiteralPath $testFile) { Remove-Item -LiteralPath $testFile } }
+}
 Get-Item -LiteralPath (Join-Path $PSScriptRoot 'PeripheralBattery.exe') | Select-Object Name, Length

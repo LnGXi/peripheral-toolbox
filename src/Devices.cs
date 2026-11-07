@@ -188,7 +188,7 @@ namespace PeripheralBattery
         public bool Supports(HidDevice d) { return d.Vendor == 0x054C && (d.Product == 0x0CE6 || d.Product == 0x0DF2) && d.Page == 1 && d.Usage == 5; }
         internal static void Parse(byte[] data, int count, BatteryDevice result)
         {
-            int offset = count >= 78 && data[0] == 0x31 ? 54 : (count >= 64 && data[0] == 1 ? 53 : -1);
+            int offset = count >= 78 && data[0] == 0x31 ? 54 : (count == 64 && data[0] == 1 ? 53 : -1);
             if (offset < 0) return;
             int status = data[offset] >> 4, level = data[offset] & 15;
             if (level > 10 || status > 2) { result.Detail = "手柄电池状态未知"; return; }
@@ -201,10 +201,18 @@ namespace PeripheralBattery
             using (var file = Native.CreateFile(d.Path, 0x80000000, 3, IntPtr.Zero, 3, 0x40000000, IntPtr.Zero))
             {
                 if (file.IsInvalid) { result.Detail = "手柄被其他程序独占或已断开"; return; }
-                if (d.InputSize == 78) { var feature = new byte[41]; feature[0] = 5; Native.HidD_GetFeature(file, feature, feature.Length); }
-                byte[] data = new byte[Math.Max(78, (int)d.InputSize)];
-                int count = Native.Transfer(file, data, false, 500);
-                Parse(data, count, result);
+                bool bluetooth = d.Transport == DeviceTransport.Bluetooth;
+                if (bluetooth) { var feature = new byte[41]; feature[0] = 5; Native.HidD_GetFeature(file, feature, feature.Length); }
+                DateTime deadline = DateTime.UtcNow.AddMilliseconds(1000);
+                while (DateTime.UtcNow < deadline && !result.Percent.HasValue)
+                {
+                    byte[] data = new byte[Math.Max(78, (int)d.InputSize)];
+                    int count = Native.Transfer(file, data, false, 250);
+                    // Bluetooth may have a queued simple input report after the
+                    // enhanced mode request. It carries no battery information.
+                    if (bluetooth && (count == 0 || data[0] != 0x31)) continue;
+                    Parse(data, count, result);
+                }
                 if (!result.Percent.HasValue) result.Detail = "已发现 · 未收到完整电量报告";
             }
         }
@@ -213,6 +221,10 @@ namespace PeripheralBattery
     {
         public string Name { get { return "USB / HID"; } }
         private readonly IHidBatteryReader[] readers = { new AtkReader(), new FlydigiReader(), new DualSenseReader(), new StandardHidReader() };
+        internal static bool IncludeInterface(HidDevice device)
+        {
+            return device.Vendor != 0 && (device.Transport == DeviceTransport.Bluetooth || device.Path.StartsWith(@"\\?\hid#vid_", StringComparison.OrdinalIgnoreCase));
+        }
         public List<BatteryDevice> Scan()
         {
             var devices = new List<HidDevice>(); Guid guid; Native.HidD_GetHidGuid(out guid);
@@ -257,7 +269,7 @@ namespace PeripheralBattery
             }
             finally { Native.SetupDiDestroyDeviceInfoList(set); }
             var result = new List<BatteryDevice>();
-            foreach (var group in devices.Where(d => d.Vendor != 0 && d.Path.StartsWith(@"\\?\hid#vid_", StringComparison.OrdinalIgnoreCase)).GroupBy(d => d.Container == "" ? d.Path : d.Container))
+            foreach (var group in devices.Where(IncludeInterface).GroupBy(d => d.Container == "" ? d.Path : d.Container))
             {
                 HidDevice selected = readers.Select(candidateReader => group.FirstOrDefault(candidateReader.Supports)).FirstOrDefault(device => device != null);
                 if (selected == null) selected = group.FirstOrDefault(d => d.Page == 1 && (d.Usage == 2 || d.Usage == 4 || d.Usage == 5 || d.Usage == 6));

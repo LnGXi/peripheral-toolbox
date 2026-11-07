@@ -44,7 +44,7 @@ Windows“已安装的应用”中可卸载“外设工具箱 Peripheral Toolbox
 | 漫步者厂商蓝牙服务 | 提供 EDF00000 控制服务的已连接耳机 | W820NB 双金标版已实测成功 |
 | 标准 HID Battery Strength | 描述符中声明标准电池 Feature 报告的设备 | 已实现，待兼容设备实测 |
 | XInput 电池接口 | Xbox 及兼容手柄 | 已实现，保留低、中、满等档位 |
-| DualSense HID 报告 | 原装 DualSense、DualSense Edge，蓝牙 | 已实现，报文解析已测试，实机待验证；USB 直连会隐藏 |
+| DualSense HID 报告 | 原装 DualSense、DualSense Edge，蓝牙 | 原装 DualSense 蓝牙实测成功，Edge 待实测；USB 直连会隐藏 |
 | ATK NK NANO | `373B:1216` 接收器，`FF05` 协议接口 | 本机已实测读取百分比 |
 | 其他品牌私有接收器 | 自动发现输入设备，电量需要对应协议 | 按型号逐步适配 |
 | 飞智黑武士 5 Pro | Flydigi V2 HID 查询 | 本机接收器实测成功，按 20% 档位显示 |
@@ -60,6 +60,8 @@ Windows 10/11，.NET Framework 4.8。使用系统自带 C# 编译器构建。
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build.ps1
 ```
+
+附带接口发现与报文回归检查，可通过 `powershell -ExecutionPolicy Bypass -File .\build.ps1 -Verify` 运行。此检查覆盖蓝牙服务 UUID 形式的 HID 路径，避免将其误当作内部接口过滤。
 
 源码采用 C# 与 WinForms，无 NuGet 包依赖。`IBatteryProvider` 接入系统级数据来源，`IHidBatteryReader` 接入设备协议。设备枚举按容器合并多个 HID 接口。添加品牌适配时应匹配具体协议接口并校验回复，仅发送已确认的电量查询。
 
@@ -77,7 +79,7 @@ v0.2.0 在 Windows 电量属性为空时，通过漫步者厂商服务实际读�
 
 v0.4.0 同机测得安装版打开面板后的私有工作集约 12 MB，旧安装版约 25.7 MB。开发预览进程的后台与打开面板状态分别约 6.3 MB、7.0 MB。该指标对应任务管理器常见的进程内存显示口径。扫描期间另有短时读取进程，峰值会增加。数值会随运行路径、Windows 缓存与设备数量变化。
 
-已检查 USB/蓝牙 DualSense 报文解析、异常电池值、短报文、未知接收器匹配、本机设备扫描、安装和自启注册。DualSense 和其他品牌设备仍需实机验证。
+已检查 USB/蓝牙 DualSense 报文解析、异常电池值、短报文、未知接收器匹配、本机设备扫描、安装和自启注册。v0.6.1 原装 DualSense 蓝牙实际读取到 100%（10% 档位约值），修复了蓝牙 HID 路径过滤遗漏。其他型号仍需实机验证。
 
 卸载通过将运行中的 EXE 移到系统临时目录完成，可能留下一份约 36 KB 的临时副本，供系统临时文件清理。首次发布版本尚无代码签名。
 
