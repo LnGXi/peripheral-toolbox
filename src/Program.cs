@@ -35,7 +35,7 @@ namespace PeripheralBattery
             using (var key = Registry.CurrentUser.CreateSubKey(RunKey)) key.SetValue("PeripheralBattery", "\"" + ExePath + "\" --background");
             using (var key = Registry.CurrentUser.CreateSubKey(UninstallKey))
             {
-                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.2.1");
+                key.SetValue("DisplayName", "外设工具箱 Peripheral Toolbox"); key.SetValue("DisplayVersion", "0.3.0");
                 key.SetValue("UninstallString", "\"" + ExePath + "\" --uninstall"); key.SetValue("DisplayIcon", ExePath);
                 key.SetValue("NoModify", 1); key.SetValue("NoRepair", 1);
             }
@@ -57,33 +57,69 @@ namespace PeripheralBattery
     {
         private readonly NotifyIcon tray;
         private readonly Popup popup = new Popup();
+        private readonly TrayMenu menu = new TrayMenu();
+        private readonly ToolStripMenuItem startup;
+        private readonly ToolStripMenuItem[] themeItems = new ToolStripMenuItem[3];
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer { Interval = 60000 };
-        private bool refreshing, exiting;
+        private bool refreshing, exiting, applyingTheme;
         internal TrayApp(bool welcome)
         {
-            var menu = new ContextMenuStrip();
-            menu.Items.Add("查看设备", null, delegate { popup.ShowAtTray(); Refresh(); });
-            menu.Items.Add("刷新", null, delegate { Refresh(); });
-            var startup = new ToolStripMenuItem("开机启动") { CheckOnClick = true, Checked = Install.Startup };
+            menu.AddAction("查看设备", "devices", delegate { popup.ShowAtTray(); Refresh(); });
+            menu.AddAction("刷新电量", "refresh", delegate { Refresh(); });
+            startup = menu.AddAction("开机启动", "startup", null);
+            startup.CheckOnClick = true;
+            startup.Checked = Install.Startup;
             startup.Click += delegate { try { Install.Startup = startup.Checked; } catch (Exception e) { startup.Checked = Install.Startup; MessageBox.Show(e.Message, "无法修改开机启动"); } };
-            menu.Items.Add(startup); menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("退出", null, delegate { ExitThread(); });
+            var themeMenu = new TrayMenu();
+            string[] themeNames = { "跟随系统", "浅色", "深色" };
+            for (int i = 0; i < themeNames.Length; i++)
+            {
+                ThemeMode mode = (ThemeMode)i;
+                themeItems[i] = themeMenu.AddAction(themeNames[i], null, delegate
+                {
+                    try { Appearance.Select(mode); ApplyTheme(); }
+                    catch (Exception error) { MessageBox.Show(error.Message, "无法修改外观"); }
+                });
+            }
+            menu.AddAction("外观", "theme", null).DropDown = themeMenu;
+            menu.Items.Add(new ToolStripSeparator { AutoSize = false, Size = new Size(220, 12) });
+            menu.AddAction("退出", "exit", delegate { ExitThread(); });
             tray = new NotifyIcon { Text = "外设工具箱", Icon = CreateIcon(), ContextMenuStrip = menu, Visible = true };
-            tray.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { if (popup.Visible) popup.Hide(); else { popup.ShowAtTray(); Refresh(); } } };
+            menu.Opening += delegate { ApplyTheme(); startup.Checked = Install.Startup; };
+            tray.MouseClick += delegate(object sender, MouseEventArgs e) { if (e.Button == MouseButtons.Left) { ApplyTheme(); if (popup.Visible) popup.Hide(); else { popup.ShowAtTray(); Refresh(); } } };
+            popup.ThemeChanged += delegate { ApplyTheme(); };
+            IntPtr windowHandle = popup.Handle;
+            ApplyTheme();
             popup.RefreshRequested += delegate { Refresh(); };
             timer.Tick += delegate { Refresh(); }; timer.Start(); Refresh();
             if (welcome) popup.ShowAtTray();
         }
         private static Icon CreateIcon()
         {
-            using (var bitmap = new Bitmap(32, 32))
+            int size = SystemInformation.SmallIconSize.Width;
+            using (var bitmap = new Bitmap(size, size))
             using (var g = Graphics.FromImage(bitmap))
-            using (var pen = new Pen(Color.FromArgb(37, 170, 135), 3))
-            using (var brush = new SolidBrush(Color.FromArgb(37, 170, 135)))
             {
-                g.Clear(Color.Transparent); g.DrawRectangle(pen, 3, 7, 23, 18); g.FillRectangle(brush, 27, 12, 3, 8); g.FillRectangle(brush, 7, 11, 15, 10);
+                g.Clear(Color.Transparent);
+                UiDrawing.DrawBatteryRing(g, new Rectangle(0, 0, size, size), Appearance.TrayColor);
                 IntPtr handle = bitmap.GetHicon(); try { return (Icon)Icon.FromHandle(handle).Clone(); } finally { Native.DestroyIcon(handle); }
             }
+        }
+        private void ApplyTheme()
+        {
+            if (exiting || applyingTheme) return;
+            applyingTheme = true;
+            try
+            {
+                Appearance.Refresh();
+                popup.ApplyTheme();
+                for (int i = 0; i < themeItems.Length; i++) themeItems[i].Checked = Appearance.Mode == (ThemeMode)i;
+                menu.ApplyTheme();
+                Icon previous = tray.Icon;
+                tray.Icon = CreateIcon();
+                if (previous != null) previous.Dispose();
+            }
+            finally { applyingTheme = false; }
         }
         private async void Refresh()
         {
@@ -104,7 +140,7 @@ namespace PeripheralBattery
         protected override void ExitThreadCore()
         {
             exiting = true; timer.Stop(); timer.Dispose(); tray.Visible = false;
-            Icon icon = tray.Icon; tray.Dispose(); icon.Dispose(); popup.Dispose(); base.ExitThreadCore();
+            Icon icon = tray.Icon; tray.Dispose(); icon.Dispose(); menu.Dispose(); popup.Dispose(); base.ExitThreadCore();
         }
     }
     internal static class Program

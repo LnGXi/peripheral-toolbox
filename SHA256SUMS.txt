@@ -1,1 +1,1 @@
-81ec4c96e5e76a4cef017875029437bbcba585b31835b8c5996a5b4b971114c1  PeripheralBattery.exe
+9a477ad59ece1e82959886186e004a48a32abe0595c1c3e953f0fd4bf8caaf8d  PeripheralBattery.exe
