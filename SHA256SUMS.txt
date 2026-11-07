@@ -1,0 +1,1 @@
+2dd98fe35025266a3897afd81396762862cd2c2b5a10cb96bed979d057f2673f  PeripheralBattery.exe
