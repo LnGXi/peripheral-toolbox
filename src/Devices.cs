@@ -7,10 +7,27 @@ using System.Text;
 
 namespace PeripheralBattery
 {
+    internal enum DeviceTransport { Unknown, Bluetooth, UsbReceiver, UsbWired, Wireless }
     internal sealed class BatteryDevice
     {
-        public string Id, Name, Connection, Detail, Level, Address;
+        public string Id, Name, Detail, Level, Address;
+        public DeviceTransport Transport;
         public int? Percent;
+        public string Connection
+        {
+            get
+            {
+                switch (Transport)
+                {
+                    case DeviceTransport.Bluetooth: return "蓝牙";
+                    case DeviceTransport.UsbReceiver: return "USB 接收器";
+                    case DeviceTransport.UsbWired: return "USB 直连";
+                    case DeviceTransport.Wireless: return "无线";
+                    default: return "连接未知";
+                }
+            }
+        }
+        public bool IsWireless { get { return Transport == DeviceTransport.Bluetooth || Transport == DeviceTransport.UsbReceiver || Transport == DeviceTransport.Wireless; } }
         public string Display { get { return Percent.HasValue ? Percent + "%" : (Level ?? "暂不支持读取"); } }
     }
     internal interface IBatteryProvider
@@ -59,7 +76,7 @@ namespace PeripheralBattery
                 if (root.Connected != true) continue;
                 var level = root.Percent;
                 if (!level.HasValue && root.Container != "") level = nodes.Where(n => n.Container == root.Container).Select(n => n.Percent).FirstOrDefault(p => p.HasValue);
-                result.Add(new BatteryDevice { Id = root.Container == "" ? root.Id : root.Container, Name = root.Name, Connection = "蓝牙", Percent = level, Detail = level.HasValue ? "Windows 最近上报的电量" : "已连接 · 系统未上报电量" });
+                result.Add(new BatteryDevice { Id = root.Container == "" ? root.Id : root.Container, Name = root.Name, Transport = DeviceTransport.Bluetooth, Percent = level, Detail = level.HasValue ? "Windows 最近上报的电量" : "已连接 · 系统未上报电量" });
             }
             return result;
         }
@@ -67,6 +84,7 @@ namespace PeripheralBattery
     internal sealed class HidDevice
     {
         internal string Path, Name, Container;
+        internal DeviceTransport Transport;
         internal ushort Vendor, Product, Page, Usage, InputSize, OutputSize, FeatureSize;
         internal List<BatteryFeature> BatteryFeatures = new List<BatteryFeature>();
     }
@@ -136,6 +154,7 @@ namespace PeripheralBattery
         public bool Supports(HidDevice d) { return d.Vendor == 0x373B && d.Product == 0x1216 && d.Page == 0xFF05; }
         public void Read(HidDevice d, BatteryDevice result)
         {
+            result.Transport = DeviceTransport.UsbReceiver;
             using (var file = Native.CreateFile(d.Path, 0xC0000000, 3, IntPtr.Zero, 3, 0x40000000, IntPtr.Zero))
             {
                 if (file.IsInvalid) { result.Detail = "接收器已发现 · 暂时无法访问"; return; }
@@ -187,7 +206,7 @@ namespace PeripheralBattery
     internal sealed class HidProvider : IBatteryProvider
     {
         public string Name { get { return "USB / HID"; } }
-        private readonly IHidBatteryReader[] readers = { new StandardHidReader(), new AtkReader(), new DualSenseReader(), new FlydigiReader() };
+        private readonly IHidBatteryReader[] readers = { new AtkReader(), new FlydigiReader(), new DualSenseReader(), new StandardHidReader() };
         public List<BatteryDevice> Scan()
         {
             var devices = new List<HidDevice>(); Guid guid; Native.HidD_GetHidGuid(out guid);
@@ -222,7 +241,7 @@ namespace PeripheralBattery
                             {
                                 if (Native.HidP_GetCaps(preparsed, caps) != 0x110000) continue;
                                 var text = new byte[256]; Native.HidD_GetProductString(file, text, text.Length);
-                                devices.Add(new HidDevice { Path = path, Vendor = attr.Vendor, Product = attr.Product, Name = Encoding.Unicode.GetString(text).TrimEnd('\0'), Container = Native.Container(set, ref info), Usage = (ushort)Marshal.ReadInt16(caps, 0), Page = (ushort)Marshal.ReadInt16(caps, 2), InputSize = (ushort)Marshal.ReadInt16(caps, 4), OutputSize = (ushort)Marshal.ReadInt16(caps, 6), FeatureSize = (ushort)Marshal.ReadInt16(caps, 8), BatteryFeatures = StandardHidReader.Discover(preparsed, (ushort)Marshal.ReadInt16(caps, 60)) });
+                                devices.Add(new HidDevice { Path = path, Vendor = attr.Vendor, Product = attr.Product, Name = Encoding.Unicode.GetString(text).TrimEnd('\0'), Container = Native.Container(set, ref info), Transport = Native.GetTransport(info.Instance), Usage = (ushort)Marshal.ReadInt16(caps, 0), Page = (ushort)Marshal.ReadInt16(caps, 2), InputSize = (ushort)Marshal.ReadInt16(caps, 4), OutputSize = (ushort)Marshal.ReadInt16(caps, 6), FeatureSize = (ushort)Marshal.ReadInt16(caps, 8), BatteryFeatures = StandardHidReader.Discover(preparsed, (ushort)Marshal.ReadInt16(caps, 60)) });
                             }
                             finally { Marshal.FreeHGlobal(caps); Native.HidD_FreePreparsedData(preparsed); }
                         }
@@ -234,11 +253,14 @@ namespace PeripheralBattery
             var result = new List<BatteryDevice>();
             foreach (var group in devices.Where(d => d.Vendor != 0 && d.Path.StartsWith(@"\\?\hid#vid_", StringComparison.OrdinalIgnoreCase)).GroupBy(d => d.Container == "" ? d.Path : d.Container))
             {
-                HidDevice selected = group.FirstOrDefault(d => readers.Any(r => r.Supports(d)));
+                HidDevice selected = readers.Select(candidateReader => group.FirstOrDefault(candidateReader.Supports)).FirstOrDefault(device => device != null);
                 if (selected == null) selected = group.FirstOrDefault(d => d.Page == 1 && (d.Usage == 2 || d.Usage == 4 || d.Usage == 5 || d.Usage == 6));
                 if (selected == null) continue;
-                var row = new BatteryDevice { Id = group.Key, Name = string.IsNullOrWhiteSpace(selected.Name) ? string.Format("HID 外设 {0:X4}:{1:X4}", selected.Vendor, selected.Product) : selected.Name, Connection = selected.InputSize == 78 && selected.Vendor == 0x054C ? "蓝牙 HID" : "USB / 接收器", Detail = "设备接口已发现 · 电量协议待适配" };
+                var row = new BatteryDevice { Id = group.Key, Name = string.IsNullOrWhiteSpace(selected.Name) ? string.Format("HID 外设 {0:X4}:{1:X4}", selected.Vendor, selected.Product) : selected.Name, Transport = selected.Transport, Detail = "设备接口已发现 · 电量协议待适配" };
                 IHidBatteryReader reader = readers.FirstOrDefault(r => r.Supports(selected));
+                // USB enumeration alone cannot distinguish a receiver from a cable.
+                // Known receiver protocols may establish the link type by querying it.
+                if (!row.IsWireless && !(reader is AtkReader) && !(reader is FlydigiReader)) continue;
                 if (reader != null)
                 {
                     try { reader.Read(selected, row); }
@@ -252,7 +274,16 @@ namespace PeripheralBattery
     internal sealed class XInputProvider : IBatteryProvider
     {
         [StructLayout(LayoutKind.Sequential)] private struct Battery { public byte Type, Level; }
+        [StructLayout(LayoutKind.Sequential)] private struct Capabilities
+        {
+            public byte Type, SubType;
+            public ushort Flags, Buttons;
+            public byte LeftTrigger, RightTrigger;
+            public short LeftX, LeftY, RightX, RightY;
+            public ushort LeftMotor, RightMotor;
+        }
         [DllImport("xinput1_4.dll")] private static extern uint XInputGetBatteryInformation(uint index, byte type, out Battery battery);
+        [DllImport("xinput1_4.dll")] private static extern uint XInputGetCapabilities(uint index, uint flags, out Capabilities capabilities);
         public string Name { get { return "XInput 手柄"; } }
         public List<BatteryDevice> Scan()
         {
@@ -261,8 +292,10 @@ namespace PeripheralBattery
             {
                 Battery battery;
                 if (XInputGetBatteryInformation(i, 0, out battery) != 0 || battery.Type == 0) continue;
+                Capabilities capabilities;
+                if (battery.Type == 1 || XInputGetCapabilities(i, 0, out capabilities) != 0 || (capabilities.Flags & 2) == 0) continue;
                 bool known = (battery.Type == 2 || battery.Type == 3) && battery.Level <= 3;
-                result.Add(new BatteryDevice { Id = "xinput-" + i, Name = "XInput 手柄 " + (i + 1), Connection = "XInput", Level = known ? new[] { "电量耗尽", "低电量", "中电量", "电量充足" }[battery.Level] : null, Detail = battery.Type == 1 ? "驱动报告有线模式 · 未提供电池信息" : known ? "驱动上报档位" : "驱动未提供有效电量" });
+                result.Add(new BatteryDevice { Id = "xinput-" + i, Name = "XInput 手柄 " + (i + 1), Transport = DeviceTransport.Wireless, Level = known ? new[] { "电量耗尽", "低电量", "中电量", "电量充足" }[battery.Level] : null, Detail = "驱动确认无线连接，未区分蓝牙或接收器 · " + (known ? "驱动上报档位" : "驱动未提供有效电量") });
             }
             return result;
         }
@@ -281,12 +314,18 @@ namespace PeripheralBattery
                     {
                         var existing = rows.FirstOrDefault(r => r.Id == row.Id);
                         if (existing == null) rows.Add(row);
-                        else if (row.Percent.HasValue && !existing.Percent.HasValue) { existing.Percent = row.Percent; existing.Detail = row.Detail; }
+                        else
+                        {
+                            // A device-specific wired result takes precedence over
+                            // cached Bluetooth properties sharing the same container.
+                            if (row.Transport == DeviceTransport.UsbWired) existing.Transport = row.Transport;
+                            if (row.Percent.HasValue && !existing.Percent.HasValue) { existing.Percent = row.Percent; existing.Detail = row.Detail; }
+                        }
                     }
                 }
                 catch (Exception error) { errors.Add(provider.Name + " · " + error.Message); }
             }
-            return rows.OrderByDescending(r => r.Percent.HasValue).ThenBy(r => r.Name).ToList();
+            return rows.Where(r => r.IsWireless).OrderByDescending(r => r.Percent.HasValue).ThenBy(r => r.Name).ToList();
         }
     }
 }

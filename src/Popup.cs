@@ -166,14 +166,15 @@ namespace PeripheralBattery
             FillRounded(g, new Rectangle(34, top + 16, 36, 36), 11, Color.FromArgb(239, 244, 247));
             DrawDeviceIcon(g, device, 40, top + 22);
             TextAt(g, device.Name, nameFont, Ink, new Rectangle(82, top + 14, 166, 26), false);
+            TextAt(g, device.Connection, smallFont, Muted, new Rectangle(83, top + 38, 175, 16), false);
             if (device.Percent.HasValue)
             {
                 Color color = device.Percent.Value <= 20 ? Color.FromArgb(218, 133, 52) : Accent;
                 TextAt(g, device.Percent.Value.ToString(), numberFont, color, new Rectangle(250, top + 9, 96, 46), true);
                 TextAt(g, "%", bodyFont, color, new Rectangle(348, top + 28, 17, 21), false);
-                FillRounded(g, new Rectangle(83, top + 48, 175, 4), 2, Color.FromArgb(235, 240, 243));
+                FillRounded(g, new Rectangle(83, top + 58, 175, 3), 1, Color.FromArgb(235, 240, 243));
                 int width = (int)Math.Round(175 * device.Percent.Value / 100.0);
-                if (width >= 4) FillRounded(g, new Rectangle(83, top + 48, width, 4), 2, color);
+                if (width >= 4) FillRounded(g, new Rectangle(83, top + 58, width, 3), 1, color);
             }
             else
             {

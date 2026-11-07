@@ -41,6 +41,24 @@ namespace PeripheralBattery
         [DllImport("kernel32.dll")] internal static extern uint WaitForSingleObject(IntPtr handle, uint timeout);
         [DllImport("user32.dll")] internal static extern bool DestroyIcon(IntPtr icon);
         [DllImport("user32.dll")] internal static extern bool SetProcessDPIAware();
+        [DllImport("cfgmgr32.dll")] private static extern uint CM_Get_Parent(out uint parent, uint instance, uint flags);
+        [DllImport("cfgmgr32.dll", CharSet=CharSet.Unicode)] private static extern uint CM_Get_Device_IDW(uint instance, StringBuilder id, uint length, uint flags);
+
+        internal static DeviceTransport GetTransport(uint instance)
+        {
+            for (int depth = 0; depth < 16; depth++)
+            {
+                var id = new StringBuilder(1024);
+                if (CM_Get_Device_IDW(instance, id, (uint)id.Capacity, 0) != 0) break;
+                string value = id.ToString();
+                if (value.StartsWith("BTH", StringComparison.OrdinalIgnoreCase)) return DeviceTransport.Bluetooth;
+                if (value.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase)) return DeviceTransport.UsbWired;
+                uint parent;
+                if (CM_Get_Parent(out parent, instance, 0) != 0) break;
+                instance = parent;
+            }
+            return DeviceTransport.Unknown;
+        }
 
         internal static byte[] Property(IntPtr set, ref DevInfo info, string guid, uint id, out uint type)
         {

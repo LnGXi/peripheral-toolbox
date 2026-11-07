@@ -4,6 +4,15 @@ namespace PeripheralBattery
 {
     internal sealed class FlydigiReader : IHidBatteryReader
     {
+        internal static DeviceTransport ConnectionType(byte mode)
+        {
+            switch (mode)
+            {
+                case 1: return DeviceTransport.UsbWired;
+                case 2: return DeviceTransport.UsbReceiver;
+                default: return DeviceTransport.Unknown;
+            }
+        }
         public bool Supports(HidDevice device)
         {
             return device.Vendor == 0x37D7 && (device.Product == 0x2401 || device.Product == 0x2501 || device.Product == 0x2502)
@@ -29,7 +38,7 @@ namespace PeripheralBattery
                     int step = device.Product == 0x2502 ? 10 : 20;
                     if (status > 2 || level * step > 100) continue;
                     result.Percent = status == 2 ? 100 : level * step;
-                    result.Connection = reply[offset + 6] == 2 ? "2.4 GHz 接收器" : "USB";
+                    result.Transport = device.Transport == DeviceTransport.Bluetooth ? DeviceTransport.Bluetooth : ConnectionType(reply[offset + 6]);
                     result.Detail = (status == 1 ? "充电中" : status == 2 ? "已充满" : "使用电池") + " · " + step + "% 档位";
                     return;
                 }
